@@ -1,0 +1,7 @@
+.vscode
+.claude
+**/build/
+**/install/
+**/log/
+**/__pycache__/
+pyrightconfig.json
