@@ -34,7 +34,7 @@ install(FILES
 )
 
 install(
-  DIRECTORY launch params map rviz
+  DIRECTORY launch params map rviz behavior_trees
   DESTINATION share/${PROJECT_NAME}
   )
 
