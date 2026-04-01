@@ -18,17 +18,22 @@ def init_db() -> None:
     cur.executescript("""
         CREATE TABLE IF NOT EXISTS SESSION (
             session_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            robot_id     INTEGER NOT NULL,
             user_id      TEXT NOT NULL,
             is_active    INTEGER NOT NULL DEFAULT 1,
             created_at   TEXT NOT NULL DEFAULT (datetime('now')),
             expires_at   TEXT
+            -- 유효 세션 판단: is_active=1 AND expires_at > datetime('now')
+            -- is_active=0: 명시적 종료(로그아웃/강제종료)
+            -- expires_at 초과: 자동 만료 — is_active=1이어도 무효
         );
 
         CREATE TABLE IF NOT EXISTS POSE_DATA (
-            pose_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id   INTEGER NOT NULL REFERENCES SESSION(session_id),
-            direction    TEXT NOT NULL,
-            histogram    BLOB
+            pose_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id       INTEGER NOT NULL REFERENCES SESSION(session_id),
+            direction        TEXT NOT NULL,
+            hsv_top_json     TEXT,
+            hsv_bottom_json  TEXT
         );
 
         CREATE TABLE IF NOT EXISTS CART (
@@ -51,11 +56,14 @@ def init_db() -> None:
 
 # --- Session CRUD stubs ---
 
-def create_session(user_id: str) -> int:
+def create_session(user_id: str, robot_id: int) -> int:
     """Create a new session and return session_id."""
     conn = _get_conn()
     cur = conn.cursor()
-    cur.execute("INSERT INTO SESSION (user_id) VALUES (?)", (user_id,))
+    cur.execute(
+        "INSERT INTO SESSION (user_id, robot_id) VALUES (?, ?)",
+        (user_id, robot_id),
+    )
     session_id = cur.lastrowid
     cur.execute("INSERT INTO CART (session_id) VALUES (?)", (session_id,))
     conn.commit()
@@ -64,13 +72,32 @@ def create_session(user_id: str) -> int:
 
 
 def close_session(session_id: int) -> None:
-    """Mark session inactive and delete pose data."""
+    """Explicitly terminate session (is_active=0) and delete pose data."""
     conn = _get_conn()
     cur = conn.cursor()
     cur.execute("UPDATE SESSION SET is_active=0 WHERE session_id=?", (session_id,))
     cur.execute("DELETE FROM POSE_DATA WHERE session_id=?", (session_id,))
     conn.commit()
     conn.close()
+
+
+def is_valid_session(session_id: int) -> bool:
+    """Return True if session is active AND not expired.
+
+    Valid condition: is_active=1 AND (expires_at IS NULL OR expires_at > now()).
+    is_active=0 → explicitly terminated (logout / force_terminate).
+    expires_at exceeded → auto-expired (timeout), regardless of is_active.
+    """
+    conn = _get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT 1 FROM SESSION WHERE session_id=? AND is_active=1 "
+        "AND (expires_at IS NULL OR expires_at > datetime('now'))",
+        (session_id,),
+    )
+    result = cur.fetchone() is not None
+    conn.close()
+    return result
 
 
 # --- Cart CRUD stubs ---

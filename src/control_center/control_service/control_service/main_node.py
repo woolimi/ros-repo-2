@@ -92,7 +92,7 @@ class ControlServiceNode(Node):
             data = json.loads(msg.data)
         except json.JSONDecodeError:
             return
-        db.insert_alarm(robot_id, data.get('event', 'UNKNOWN'))
+        db.insert_alarm(robot_id, data.get('event', 'UNKNOWN'), data.get('user_id'))
         if self._app_bridge:
             self._app_bridge.on_alarm(robot_id, data.get('event', 'UNKNOWN'),
                                       datetime.now(timezone.utc).isoformat())

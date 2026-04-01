@@ -32,10 +32,11 @@ def init_db() -> None:
             );
 
             CREATE TABLE IF NOT EXISTS ZONE (
-                zone_id      INTEGER PRIMARY KEY,
-                zone_name    TEXT NOT NULL,
-                waypoint_x   REAL,
-                waypoint_y   REAL,
+                zone_id        INTEGER PRIMARY KEY,
+                zone_name      TEXT NOT NULL,
+                zone_type      TEXT NOT NULL DEFAULT 'product',
+                waypoint_x     REAL,
+                waypoint_y     REAL,
                 waypoint_theta REAL
             );
 
@@ -57,6 +58,7 @@ def init_db() -> None:
 
             CREATE TABLE IF NOT EXISTS ROBOT (
                 robot_id       TEXT PRIMARY KEY,
+                ip_address     TEXT,
                 current_mode   TEXT NOT NULL DEFAULT 'OFFLINE',
                 pos_x          REAL DEFAULT 0.0,
                 pos_y          REAL DEFAULT 0.0,
@@ -68,6 +70,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS ALARM_LOG (
                 log_id      INTEGER PRIMARY KEY AUTOINCREMENT,
                 robot_id    TEXT NOT NULL,
+                user_id     TEXT,
                 event_type  TEXT NOT NULL,
                 occurred_at TEXT NOT NULL DEFAULT (datetime('now')),
                 resolved_at TEXT
@@ -105,13 +108,13 @@ def upsert_robot_status(robot_id: str, mode: str, pos_x: float, pos_y: float,
         conn.close()
 
 
-def insert_alarm(robot_id: str, event_type: str) -> int:
+def insert_alarm(robot_id: str, event_type: str, user_id: str = None) -> int:
     """Insert a new alarm log entry. Returns log_id."""
     with _lock:
         conn = _get_conn()
         cur = conn.execute(
-            "INSERT INTO ALARM_LOG (robot_id, event_type) VALUES (?, ?)",
-            (robot_id, event_type),
+            "INSERT INTO ALARM_LOG (robot_id, user_id, event_type) VALUES (?, ?, ?)",
+            (robot_id, user_id, event_type),
         )
         log_id = cur.lastrowid
         conn.commit()
