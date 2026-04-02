@@ -1,0 +1,23 @@
+# Keepout Filter Mask — ShopPinkki 복귀 전용 통행 제한 구역
+#
+# 이 맵은 로봇이 RETURNING 상태일 때 global_costmap에 적용됩니다.
+# nav2_lifecycle_manager_filter (autostart=false)를 통해
+# BTReturning 시작 시 활성화, 완료/실패 시 비활성화됩니다.
+#
+# 마스크 규칙:
+#   픽셀값 0   → 통행 가능 (no cost)
+#   픽셀값 255 → 통행 불가 (lethal cost, keepout zone)
+#
+# 편집 방법:
+#   1. shop.pgm을 GIMP 또는 스크립트로 복사
+#   2. 지나가지 말아야 할 구역(상품 진열대 통로 등)을 흰색(255)으로 칠함
+#   3. 나머지(메인 복귀 통로)는 검정(0)으로 유지
+#
+# TODO: shop.yaml의 resolution/origin 값을 실측 후 아래 값 확정
+
+image: keepout_mask.pgm
+resolution: 0.05           # shop.yaml 과 동일해야 함
+origin: [0.0, 0.0, 0.0]   # shop.yaml 과 동일해야 함
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196

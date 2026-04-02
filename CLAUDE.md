@@ -30,9 +30,10 @@ source install/setup.zsh
 ### Python Dependencies (pip)
 
 ```bash
-pip install transitions          # SM 라이브러리 (shoppinkki_core)
-pip install flask flask-socketio # customer_web
-pip install ultralytics          # YOLO (shoppinkki_perception)
+pip install transitions              # SM 라이브러리 (shoppinkki_core)
+pip install flask flask-socketio     # customer_web
+pip install ultralytics              # YOLO (shoppinkki_perception)
+pip install mysql-connector-python   # control_service DB 접속
 ```
 
 ## Testing & Linting
@@ -153,11 +154,11 @@ ros_ws/
 **`src/shoppinkki/`** provides application logic (Pi 5 실행):
 - `shoppinkki_interfaces` — Python Protocol 인터페이스 + Mock 구현체 (`protocols.py`, `mocks.py`)
 - `shoppinkki_core` — 메인 노드. SM(18개 상태) + BT Runner + HW 제어(LED, LCD, 부저)
-- `shoppinkki_nav` — Nav2 기반 BT (BTWaiting, BTGuiding, BTReturning, BTStandBy) + BoundaryMonitor. shop 맵 포함
+- `shoppinkki_nav` — Nav2 기반 BT (BTWaiting, BTGuiding, BTReturning, BTStandBy) + BoundaryMonitor. shop 맵 포함. **Keepout Filter**: `config/keepout_mask.yaml` + `lifecycle_manager_filter`(autostart=false) — BTReturning 진입 시 활성화, 완료/실패 시 비활성화
 - `shoppinkki_perception` — 커스텀 YOLO 인형 감지 (`DollDetector`) + QR 스캔
 
 **`src/control_center/`** provides server-side logic (서버 PC 실행):
-- `control_service` — ROS2 노드 + TCP 서버(8080) + REST API(8080) + 중앙 SQLite DB. Pi ↔ customer_web 중계. `QueueManager` 포함
+- `control_service` — ROS2 노드 + TCP 서버(8080) + REST API(8080) + 중앙 MySQL DB. Pi ↔ customer_web 중계. `QueueManager` 포함
 - `admin_ui` — TCP 클라이언트 관제 앱. control_service 채널 B(TCP)로 연결. 별도 기기 또는 프로세스로 실행
 
 **`services/`** provides non-ROS services:
@@ -171,7 +172,7 @@ ros_ws/
 - **Behavior Trees:** BT1=TRACKING(P-Control), BT2=SEARCHING(회전 탐색), BT3=WAITING(통행 회피), BT4=GUIDING(Nav2), BT5=RETURNING+Standby(Nav2 + 대기열 배정)
 - **Communication Channels (A~H):** `docs/system_architecture.md` 기준
   - A: Customer UI ↔ customer_web (WebSocket)
-  - B: Admin UI ↔ control_service (TCP)
+  - B: Admin UI ↔ control_service (TCP) — admin이 `mode`/`force_terminate`/`admin_goto`/`dismiss_alarm` 명령 전송 가능
   - C: customer_web ↔ control_service (TCP :8080)
   - D: customer_web ↔ LLM (REST :8000)
   - E: control_service ↔ Control DB (TCP)
@@ -233,7 +234,7 @@ ros_ws/
 
 ## DB Schema Summary
 
-### 중앙 서버 DB (`control_service/data/control.db`)
+### 중앙 서버 MySQL DB (`shoppinkki` database, localhost:3306)
 
 | 테이블 | 주요 컬럼 | 용도 |
 |---|---|---|
@@ -288,8 +289,9 @@ ros_ws/
 
 - **cleanup 스레드** (10s 주기): `last_seen < now - 30s` → `current_mode='OFFLINE'`, `active_user_id=NULL`
 - **QueueManager**: RETURNING 시 `/queue/assign` 호출 → zone 140/141/142 배정. 앞 위치 비워지면 `queue_advance` cmd 전송
-- **DB Lock**: `threading.Lock()` (`_lock`) — ROS 스레드 + cleanup 스레드 + Flask 스레드 동시 접근 보호
-- **SQLite UPDATE 주의**: `UPDATE ... ORDER BY ... LIMIT 1` — SQLite 미지원. 서브쿼리로 `log_id` 먼저 조회 필요
+- **MySQL connection pool**: `pool_size=5`. 연결 설정은 환경 변수 `MYSQL_HOST/PORT/USER/PASSWORD/DATABASE`로 관리
+- **SQL 패턴**: 플레이스홀더 `%s`, 명시적 cursor, `cursor(dictionary=True)`로 dict row 반환. `UPDATE ... ORDER BY ... LIMIT 1` MySQL에서 직접 지원
+- **Keepout Filter**: RETURNING 시 `lifecycle_manager_filter` STARTUP으로 활성화, 완료/실패 시 PAUSE. BTGuiding에는 미적용
 
 ## Key Documentation
 
@@ -303,6 +305,8 @@ ros_ws/
 | `docs/behavior_tree.md` | 5개 BT flowchart + SM↔BT 역할 분담 |
 | `docs/erd.md` | DB 스키마 (중앙 서버 DB 통합). Pi 로컬 DB 없음 |
 | `docs/map.md` | 미니어처 마트 맵 레이아웃, 구역 ID |
+| `docs/customer_ui.md` | Customer UI (customer_web) 화면 구성, 기능 목록, 유저 플로우 |
+| `docs/admin_ui.md` | Admin UI 화면 구성, 기능 목록, TCP 메시지 요약, 유저 플로우 |
 | `docs/scaffold_plan.md` | 패키지 뼈대 구현 계획 + 체크리스트 |
 | `docs/scenarios/index.md` | 시나리오 목록 (우선순위 순, 총 18개) |
 | `cheatsheet.md` | SLAM and navigation command reference |
