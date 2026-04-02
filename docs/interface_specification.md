@@ -112,25 +112,24 @@ class RobotPublisherInterface(Protocol):
     # /robot_<id>/status 발행 (1~2Hz heartbeat)
 
     def publish_alarm(self, event_type: str, user_id: str = "") -> None: ...
-    # /robot_<id>/alarm 발행 (즉시). event_type: THEFT | BATTERY | TIMEOUT | PAYMENT_ERROR
+    # /robot_<id>/alarm 발행 (즉시). event_type: THEFT | BATTERY_LOW | TIMEOUT | PAYMENT_ERROR
 
     def publish_cart(self) -> None: ...
-    # /robot_<id>/cart 발행. Pi DB CART_ITEM 전체 → JSON
+    # /robot_<id>/cart 발행. Control DB CART_ITEM 조회 → JSON
 
     def add_cart_item(self, product_name: str, price: int) -> None: ...
-    # Pi DB에 CART_ITEM 추가 후 publish_cart() 호출
+    # Control DB에 CART_ITEM 추가 후 publish_cart() 호출 (REST API 경유)
 
     def get_cart_items(self) -> list[CartItem]: ...
 
     def clear_cart(self) -> None: ...
-    # Pi DB CART_ITEM 전체 삭제 후 publish_cart() 호출
+    # Control DB CART_ITEM 전체 삭제 후 publish_cart() 호출 (REST API 경유)
 
     def terminate_session(self) -> None: ...
-    # 1. CART_ITEM 전체 삭제 (CART.session_id 기준)
-    # 2. POSE_DATA 전체 삭제 (session_id 기준)
-    # 3. SESSION.is_active = False, expires_at = now
+    # 1. CART_ITEM 전체 삭제 (REST API 경유)
+    # 2. POSE_DATA 전체 삭제 (REST API 경유)
+    # 3. SESSION.is_active = False (REST API 경유)
     # 호출 직후 publish_status(mode="IDLE") 발행으로 control_service에 즉시 통보
-    # (heartbeat 주기 대기 없이 active_user_id = NULL 처리 유도)
 ```
 
 ---
@@ -158,7 +157,25 @@ class RobotPublisherInterface(Protocol):
 
 ---
 
-### 채널 B — customer_web ↔ control_service (TCP localhost:8080, JSON 개행 구분)
+### 채널 B — Admin UI ↔ control_service (TCP)
+
+> **변경:** 기존 동일 프로세스 직접 참조(채널 D) → **별도 기기에서 TCP로 연결**하는 독립 클라이언트
+
+| 방향 | 메시지 | 설명 |
+|---|---|---|
+| admin → control | `{"cmd": "dismiss_alarm", "robot_id": 54}` | 알람 해제 |
+| admin → control | `{"cmd": "force_terminate", "robot_id": 54}` | 세션 강제 종료 → Pi `{"cmd": "force_terminate"}` relay |
+| admin → control | `{"cmd": "admin_goto", "robot_id": 54, "x": 1.2, "y": 0.8, "theta": 0.0}` | 위치 호출 → Pi relay. IDLE 상태 로봇만 수락 |
+| control → admin | `{"type": "status", "robot_id": 54, "mode": "TRACKING", "pos_x": 1.2, "pos_y": 0.8, "battery": 72}` | 로봇 상태 실시간 Push (1~2Hz) |
+| control → admin | `{"type": "alarm", "robot_id": 54, "event_type": "THEFT", "occurred_at": "..."}` | 알람 발생 |
+| control → admin | `{"type": "alarm_dismissed", "robot_id": 54}` | 알람 해제 완료 |
+| control → admin | `{"type": "offline", "robot_id": 54}` | 로봇 오프라인 감지 |
+| control → admin | `{"type": "online", "robot_id": 54}` | 로봇 온라인 복귀 |
+| control → admin | `{"type": "event", ...}` | 운용 이벤트 |
+
+---
+
+### 채널 C — customer_web ↔ control_service (TCP localhost:8080, JSON 개행 구분)
 
 | 방향 | 메시지 |
 |---|---|
@@ -166,7 +183,6 @@ class RobotPublisherInterface(Protocol):
 | web → control | `{"cmd": "session_check", "robot_id": 54}` |
 | web → control | `{"cmd": "mode", "robot_id": 54, "value": "WAITING"}` |
 | web → control | `{"cmd": "navigate_to", "robot_id": 54, "zone_id": 6}` |
-| web → control | `{"cmd": "find_product", "robot_id": 54, "product": "콜라"}` |
 | web → control | `{"cmd": "delete_item", "robot_id": 54, "item_id": 3}` |
 | web → control | `{"cmd": "process_payment", "robot_id": 54}` — 가상 결제 요청 |
 | web → control | `{"cmd": "dismiss_alarm", "robot_id": 54, "pin": "1234"}` — 현장 PIN으로 알람 해제 |
@@ -178,7 +194,35 @@ class RobotPublisherInterface(Protocol):
 
 ---
 
-### 채널 C — Pi 5 ↔ control_service (ROS DDS, `ROS_DOMAIN_ID=14`)
+### 채널 D — customer_web ↔ LLM (TCP/REST HTTP, 포트 8000)
+
+> **변경:** 기존 control_service → LLM (단방향) → **customer_web이 LLM과 직접 통신**
+
+| 메서드 | 경로 | 요청 | 응답 | 설명 |
+|---|---|---|---|---|
+| GET | `/query` | `?name=콜라` | `{"zone_id": 3, "zone_name": "음료 코너"}` | 자연어 상품명 검색 |
+
+---
+
+### 채널 E — control_service ↔ Control DB (TCP)
+
+> Control DB가 독립 서비스로 분리. control_service가 TCP로 접근.
+> SESSION / CART / CART_ITEM / POSE_DATA 포함 전체 테이블 관리.
+
+---
+
+### 채널 F — control_service ↔ YOLO (TCP + UDP 하이브리드)
+
+> **변경:** 기존 Pi → YOLO TCP → **control_service가 영상을 UDP로 수신 후 YOLO에 전달**
+
+| 방향 | 프로토콜 | 데이터 | 설명 |
+|---|---|---|---|
+| control → YOLO | **UDP** | 원시 영상 프레임 | 고용량 영상 → 지연 최소화를 위해 UDP |
+| YOLO → control | **TCP** | `{"cx": 320, "cy": 240, "confidence": 0.92}` | 인식 결과 좌표 → 유실 불허이므로 TCP |
+
+---
+
+### 채널 G — control_service ↔ shoppinkki packages (ROS 2 DDS, `ROS_DOMAIN_ID=14`)
 
 | 방향 | 토픽 | 타입 | 페이로드 |
 |---|---|---|---|
@@ -191,35 +235,39 @@ class RobotPublisherInterface(Protocol):
 | control → Pi | `/robot_<id>/cmd` | `std_msgs/String` | `{"cmd": "dismiss_alarm"}` |
 | control → Pi | `/robot_<id>/cmd` | `std_msgs/String` | `{"cmd": "payment_error"}` — 결제 실패 시 ALARM 전환 트리거 |
 | control → Pi | `/robot_<id>/cmd` | `std_msgs/String` | `{"cmd": "delete_item", "item_id": 3}` |
-| control → Pi | `/robot_<id>/cmd` | `std_msgs/String` | `{"cmd": "force_terminate"}` — 관제 강제 종료. Pi: `terminate_session()` + `sm.trigger('admin_force_idle')` |
+| control → Pi | `/robot_<id>/cmd` | `std_msgs/String` | `{"cmd": "force_terminate"}` — 관제 강제 종료 |
 | control → Pi | `/robot_<id>/cmd` | `std_msgs/String` | `{"cmd": "admin_goto", "x": 1.2, "y": 0.8, "theta": 0.0}` — IDLE 상태에서 Nav2 직접 목표 전송 |
 
 ---
 
-### 채널 E — Pi 5 ↔ control_service (REST HTTP, 포트 8080)
+### 채널 H — control_service ↔ pinky_pro packages (ROS 2 + UDP)
 
-BTGuiding / BTReturning이 Waypoint 좌표를 조회하는 내부 REST API.
+> **변경:** 주행 명령은 ROS 2로, 원시 카메라·센서 데이터는 UDP로 서버에 직접 스트리밍
+
+| 방향 | 프로토콜 | 데이터 | 설명 |
+|---|---|---|---|
+| control → pinky | ROS 2 DDS | `/cmd_vel` (`geometry_msgs/Twist`) | 모터 속도 명령 |
+| pinky → control | ROS 2 DDS | `/odom`, `/scan`, `/amcl_pose` | 오도메트리, LiDAR, AMCL 위치 |
+| pinky → control | **UDP** | 원시 카메라 프레임 | 영상 스트리밍. 처리 후 채널 F로 YOLO 전달 |
+
+---
+
+## REST API (Pi → control_service, 포트 8080)
+
+BTGuiding / BTReturning 및 Pi가 Control DB를 조회하는 내부 REST API.
 
 | 메서드 | 경로 | 응답 | 설명 |
 |---|---|---|---|
 | GET | `/zone/<zone_id>/waypoint` | `{"x": 1.2, "y": 0.8, "theta": 0.0}` | zone_id의 Nav2 목표 좌표 조회 |
 | GET | `/boundary` | `{"shop_boundary": {...}, "payment_zone": {...}}` | BOUNDARY_CONFIG 전체 조회 |
-| GET | `/find_product?query=<str>` | `{"zone_id": 3, "zone_name": "음료 코너"}` | 상품명 검색 (테스트/디버그용) |
-| GET | `/queue/assign?robot_id=<id>` | `{"zone_id": 140}` | 대기열 position 배정. BTReturning 시작 시 호출. zone 140(1번) 또는 141(2번) 반환 |
-| GET | `/events?robot_id=<id>&limit=<n>` | `[{"log_id":1, "event_type":"SESSION_START", ...}]` | EVENT_LOG 조회. robot_id 생략 시 전체 로봇 이벤트 반환 |
-
----
-
-### 채널 D — admin_app ↔ control_service (동일 서버 PC 내 직접 참조)
-
-> `admin_app`과 `control_service`는 같은 프로세스(또는 동일 PC 내)에서 동작하므로 ROS DDS를 거치지 않고 직접 참조한다.
-
-| 방향 | 데이터 | 용도 |
-|---|---|---|
-| control → admin | 로봇 상태 dict (mode, pos_x, pos_y, battery) | 로봇 위치·모드 실시간 표시 |
-| control → admin | 알람 이벤트 dict (event_type, robot_id) | 알람 패널 표시 |
-| control → admin | offline 이벤트 (robot_id) | 로봇 카드 회색 처리 |
-| control → admin | online 복귀 이벤트 (robot_id) | 로봇 카드 정상 복구 |
-| admin → control | `dismiss_alarm(robot_id)` | 알람 해제 |
-| admin → control | `force_terminate(robot_id)` | 세션 강제 종료 → Pi `{"cmd": "force_terminate"}` relay |
-| admin → control | `admin_goto(robot_id, x, y, theta)` | 위치 호출 → Pi `{"cmd": "admin_goto", "x":..., "y":..., "theta":...}` relay. IDLE 상태 로봇만 수락 |
+| GET | `/find_product?query=<str>` | `{"zone_id": 3, "zone_name": "음료 코너"}` | 상품명 검색 |
+| GET | `/queue/assign?robot_id=<id>` | `{"zone_id": 140}` | 대기열 position 배정. zone 140(1번) 또는 141(2번) 반환 |
+| GET | `/events?robot_id=<id>&limit=<n>` | `[{"log_id":1, "event_type":"SESSION_START", ...}]` | EVENT_LOG 조회 |
+| POST | `/session` | `{"session_id": "..."}` | 세션 생성 (Pi DB 제거 후 Control DB에 직접 저장) |
+| GET | `/session/<session_id>` | `{"is_active": true, "expires_at": "..."}` | 세션 유효성 조회 |
+| PATCH | `/session/<session_id>` | `{"ok": true}` | 세션 종료 (`is_active=false`) |
+| POST | `/cart/<session_id>/item` | `{"item_id": 5}` | CART_ITEM 추가 |
+| DELETE | `/cart/<session_id>/item/<item_id>` | `{"ok": true}` | CART_ITEM 삭제 |
+| DELETE | `/cart/<session_id>/items` | `{"ok": true}` | CART_ITEM 전체 삭제 |
+| POST | `/pose/<session_id>` | `{"ok": true}` | POSE_DATA 저장 |
+| DELETE | `/pose/<session_id>` | `{"ok": true}` | POSE_DATA 전체 삭제 |

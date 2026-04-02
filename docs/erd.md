@@ -7,6 +7,8 @@
 
 ## 저장 위치 구분
 
+> **변경 사항:** Pi 5 로컬 DB 제거. SESSION / POSE_DATA / CART / CART_ITEM 모두 중앙 서버 DB로 통합.
+
 | 엔티티 | 저장 위치 | 근거 |
 |---|---|---|
 | USER | 중앙 서버 DB | SR-10 — Pi 5는 계정 DB 미보유 |
@@ -17,10 +19,10 @@
 | ROBOT | 중앙 서버 DB | SR-61 — Pi 5가 ROS DDS (채널 C, `/robot_<id>/status`)로 상태 보고 |
 | ALARM_LOG | 중앙 서버 DB | SR-63 — 이벤트 발생 시 즉시 전송 |
 | EVENT_LOG | 중앙 서버 DB | scenario_17 — 운용 이벤트 타임라인 |
-| SESSION | Pi 5 로컬 | SR-18 — 활성 세션 여부를 Pi 5가 관리 |
-| POSE_DATA | Pi 5 로컬 | SR-17 — 세션 종료 시 삭제 |
-| CART | Pi 5 로컬 | SR-42 — Flask 웹앱에서 관리 |
-| CART_ITEM | Pi 5 로컬 | SR-41, SR-42 |
+| SESSION | 중앙 서버 DB | Pi 로컬 DB 제거 → Control Service REST API로 관리 |
+| POSE_DATA | 중앙 서버 DB | Pi 로컬 DB 제거 → Control Service REST API로 관리 |
+| CART | 중앙 서버 DB | Pi 로컬 DB 제거 → Control Service REST API로 관리 |
+| CART_ITEM | 중앙 서버 DB | Pi 로컬 DB 제거 → Control Service REST API로 관리 |
 
 ---
 
@@ -131,22 +133,18 @@ erDiagram
     ROBOT ||--o{ ALARM_LOG : "generates"
     USER ||--o{ ALARM_LOG : "linked to"
     ROBOT ||--o{ EVENT_LOG : "logged"
-
-    %% Pi 5 로컬 DB 내부 관계
+    USER ||--o{ SESSION : "starts"
+    ROBOT ||--o{ SESSION : "assigned"
     SESSION ||--|| CART : "has"
     SESSION ||--o{ POSE_DATA : "captures"
     CART ||--o{ CART_ITEM : "contains"
-
-    %% Cross-DB 논리적 참조 (물리적 FK 구현 불가)
-    USER ||--o{ SESSION : "logical ref"
-    ROBOT ||--o{ SESSION : "logical ref"
 ```
 
 ---
 
 ## 엔티티 상세
 
-### 중앙 서버 DB
+### 중앙 서버 DB (`control_service/data/control.db`)
 
 #### USER
 사용자 계정 정보. 어느 쑈삥끼에서든 동일 계정으로 이용 가능 (UR-02).
@@ -181,7 +179,7 @@ erDiagram
 | waypoint_theta | FLOAT | Nav2 목표 방향 (rad) |
 
 #### PRODUCT
-상품명과 진열 구역의 매핑 테이블. Pi 5가 물건 찾기 요청 시 중앙 서버에 상품명으로 질의하면 해당 ZONE의 Waypoint를 응답받는다 (SR-81, UR-15).
+상품명과 진열 구역의 매핑 테이블. 물건 찾기 요청 시 Control Service에 상품명으로 질의하면 해당 ZONE의 Waypoint를 응답받는다 (SR-81, UR-15).
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
@@ -245,18 +243,14 @@ erDiagram
 
 > **ALARM_LOG와 관계:** ALARM_RAISED / ALARM_DISMISSED는 EVENT_LOG에 요약 기록되며, ALARM_LOG가 resolved_at을 포함하는 원본. 중복 기록이나 EVENT_LOG가 ALARM_LOG를 대체하지 않는다.
 
----
-
-### Pi 5 로컬 DB
-
 #### SESSION
-Pi 5가 관리하는 활성 세션. 세션 쿠키 유효성 및 사용 중 차단 판단에 사용 (SR-15, SR-18).
+활성 세션 정보. Control Service가 REST API로 관리. 세션 쿠키 유효성 및 사용 중 차단 판단에 사용 (SR-15, SR-18).
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | session_id | STRING | PK (쿠키 토큰) |
-| robot_id | INT | 이 Pi 5의 robot_id |
-| user_id | STRING | FK → 중앙 서버 USER |
+| robot_id | INT | FK → ROBOT |
+| user_id | STRING | FK → USER |
 | created_at | DATETIME | 세션 시작 시각 |
 | expires_at | DATETIME | 자동 만료 시각. 현재 시각 초과 시 SR-16 플로우 적용 |
 | is_active | BOOL | 명시적 종료 플래그. 로그아웃·강제 종료 시 false로 설정 |

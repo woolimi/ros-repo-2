@@ -22,15 +22,17 @@ ros_ws/
 │   │
 │   ├── shoppinkki/                         ← Pi 5 실행 ROS2 패키지 (구현 대상)
 │   │   ├── shoppinkki_interfaces/          ← 인터페이스 명세 (전원 공유)
-│   │   ├── shoppinkki_core/                ← 메인 노드 (SM + BT + HW)
-│   │   │   └── data/pi.db                 ← Pi SQLite: SESSION, POSE_DATA, CART, CART_ITEM
+│   │   ├── shoppinkki_core/                ← 메인 노드 (SM + BT + HW) — Pi 로컬 DB 없음
 │   │   ├── shoppinkki_nav/                 ← Nav2 주행 BT + 경계 감시
 │   │   └── shoppinkki_perception/          ← 인식 (YOLO + ReID + QR + 포즈 스캔)
 │   │
 │   └── control_center/                     ← 서버 PC 실행 ROS2 패키지 (구현 대상)
 │       ├── control_service/                ← ROS2 노드 + TCP 서버 + REST API
-│       │   └── data/control.db            ← Control SQLite: USER, CARD, ZONE, PRODUCT, BOUNDARY_CONFIG, ROBOT, ALARM_LOG
-│       └── admin_app/                      ← PyQt + rclpy 관제 대시보드
+│       │   └── data/control.db            ← Control SQLite: 모든 테이블 통합
+│       │                                     (USER, CARD, ZONE, PRODUCT, BOUNDARY_CONFIG,
+│       │                                      ROBOT, ALARM_LOG, EVENT_LOG,
+│       │                                      SESSION, POSE_DATA, CART, CART_ITEM)
+│       └── admin_app/                      ← 별도 기기 TCP 관제 클라이언트
 │
 ├── services/                               ← 비 ROS2 서비스 (독립 실행, 구현 대상)
 │   ├── customer_web/                       ← Flask + SocketIO 고객 웹앱 (포트 5000)
@@ -151,7 +153,7 @@ src/shoppinkki/shoppinkki_core/
 - [ ] `bt_runner.py` — `start(bt, hz)` / `stop()` / `on_result` 콜백 시그니처 완성
 - [ ] `bt_tracking.py` 스텁 — `NavBTInterface` 구현 시그니처, 본문 `pass` 또는 `return "RUNNING"`
 - [ ] `bt_searching.py` 스텁 — 동일
-- [ ] `db.py` — `init_db()` (테이블 생성: SESSION, POSE_DATA, CART, CART_ITEM), CRUD 함수 시그니처
+- [ ] ~~`db.py`~~ — Pi 로컬 DB 제거. 세션/카트/포즈 데이터는 모두 REST API (채널 E) 경유로 Control Service에 저장
 - [ ] `main_node.py` — Mock으로 완전 와이어링
   - `MockOwnerDetector`, `MockQRScanner`, `MockPoseScanner`, `MockNavBT` × 3, `MockBoundaryMonitor`, `MockRobotPublisher` 주입
   - `/robot_<id>/cmd` 구독 → `sm.trigger()` 호출
@@ -265,11 +267,11 @@ src/control_center/control_service/
 ### 체크리스트
 
 - [ ] `package.xml` + `setup.py` (의존: `rclpy`, `std_msgs`)
-- [ ] `db.py` — `init_db()` (테이블 생성: user, card, zone, product, boundary_config, robot, alarm_log), CRUD 함수 시그니처
+- [ ] `db.py` — `init_db()` (테이블 생성: USER, CARD, ZONE, PRODUCT, BOUNDARY_CONFIG, ROBOT, ALARM_LOG, EVENT_LOG, **SESSION, POSE_DATA, CART, CART_ITEM**), CRUD 함수 시그니처
 - [ ] `seeds/seed_data.py` — 초기 데이터 삽입 스크립트 (ZONE 14개, PRODUCT 샘플, BOUNDARY_CONFIG 2개. 실측 좌표는 나중에 채움)
 - [ ] `tcp_server.py` 스텁 — `start()`, 수신 메시지 타입별 `handle_*()` 함수 시그니처
 - [ ] cleanup 스레드 스텁 — `ROBOT_TIMEOUT_SEC=30` 기준 `last_seen` 초과 로봇의 `active_user_id = NULL` 처리 (10초 주기)
-- [ ] `llm_client.py` 스텁 — `query_product(name: str) → dict` 시그니처 (REST GET localhost:8000)
+- [ ] ~~`llm_client.py`~~ — LLM 호출 주체가 customer_web으로 변경. control_service에서 제거
 - [ ] `main_node.py` 스텁 — ROS2 노드 초기화, topic 구독 시그니처 (`/robot_<id>/status`, `/robot_<id>/alarm`, `/robot_<id>/cart`)
 - [ ] `colcon build --packages-select control_service` 통과
 - [ ] `python seeds/seed_data.py` → DB 생성 + 초기 데이터 확인
@@ -313,7 +315,8 @@ services/customer_web/
 - [ ] `requirements.txt` 생성
 - [ ] `config.py` — 환경변수 기반 설정 (`CONTROL_SERVICE_HOST`, `CONTROL_SERVICE_PORT=8080`)
 - [ ] `app.py` 스텁 — Flask + SocketIO 초기화, Blueprint 등록
-- [ ] `tcp_client.py` 스텁 — `connect()`, `send(data)`, `disconnect()` 시그니처
+- [ ] `tcp_client.py` 스텁 — `connect()`, `send(data)`, `disconnect()` 시그니처 (control_service 연결)
+- [ ] `llm_client.py` 스텁 — `query_product(name: str) → dict` 시그니처 (REST GET LLM:8000) — **customer_web이 직접 호출**
 - [ ] `ws_handler.py` 스텁 — SocketIO 이벤트 핸들러 함수 시그니처 (`on_connect`, `on_cmd` 등)
 - [ ] `routes/auth.py` 스텁 — `GET /` (login.html 렌더링), `POST /login` (TCP 전달 스텁)
 - [ ] 모든 HTML 템플릿 기본 파일 생성 (`base.html` extends 구조)
@@ -323,9 +326,10 @@ services/customer_web/
 
 ## 7. admin_app (범위 외 — 이후 구현)
 
-> PyQt + rclpy 관제 대시보드. scaffold 단계에서는 구현하지 않는다.
-> ROS DDS로 `/robot_<id>/status`, `/robot_<id>/alarm` 구독 후 PyQt 화면에 표시.
-> `control_service` 빌드 및 ROS 토픽 통신이 검증된 이후 착수.
+> **변경:** 기존 동일 프로세스 직접 참조 → **별도 기기에서 TCP로 control_service에 연결하는 독립 클라이언트**
+> scaffold 단계에서는 구현하지 않는다.
+> control_service TCP(8080) 연결 후 로봇 상태 수신, 알람/강제종료/위치호출 명령 전송.
+> `control_service` 빌드 및 TCP 통신이 검증된 이후 착수.
 
 ---
 
@@ -364,7 +368,7 @@ services/ai_server/
 | 전체 ROS2 패키지 빌드 | `colcon build` |
 | shoppinkki_core 노드 기동 (Mock) | `ros2 run shoppinkki_core main_node` |
 | SM: IDLE → REGISTERING 전환 확인 | `ros2 topic pub /robot_54/cmd ...` |
-| Pi DB 초기화 | `python -c "from shoppinkki_core.db import init_db; init_db()"` |
+| Pi DB 초기화 | ~~Pi 로컬 DB 제거~~ — 중앙 DB 시드 스크립트로 대체 |
 | control_service 빌드 | `colcon build --packages-select control_service` |
 | 중앙 DB 초기화 + 시드 데이터 | `python seeds/seed_data.py` |
 | customer_web Flask 기동 | `python services/customer_web/app.py` |

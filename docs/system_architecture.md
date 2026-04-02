@@ -25,32 +25,32 @@
 graph TD
     subgraph UI["UI"]
         browser["Customer UI\n(스마트폰 브라우저)"]
-        admin_ui["Admin UI\n(관제 대시보드)"]
+        admin_ui["Admin UI\n(관제 대시보드 — 별도 기기)"]
     end
 
     subgraph Server["서버 PC"]
-        customer_web["customer_web\n(Flask + SocketIO, 포트 5000)"]
-        control["control_service\n(ROS2 노드 + TCP 서버:8080)"]
-        admin_app["admin_app\n(PyQt + rclpy)"]
+        customer_web["customer_web\n(Flask + SocketIO, 포트 8501)"]
+        control["control_service\n(ROS2 노드 + TCP:8080 + REST:8080)"]
+        control_db["Control DB\n(SQLite — 모든 테이블 통합)"]
         subgraph Docker["ai_server (Docker Compose)"]
-            yolo["yolo\n(TCP:5005)"]
+            yolo["yolo\n(TCP+UDP:5005)"]
             llm["llm\n(REST:8000)"]
         end
     end
 
-    subgraph Pi5["장비 — Raspberry Pi 5 (Pinky Pro)"]
-        core["shoppinkki_core\n(SM + BT + HW)"]
-        perception["shoppinkki_perception"]
-        nav["shoppinkki_nav"]
+    subgraph Equip["장비 — Cart Module (Pinky Pro × N)"]
+        core["shoppinkki packages\n(SM + BT + HW)"]
+        pinky["pinky_pro packages\n(모터 + 센서 드라이버)"]
     end
 
-    browser  <-->|"WebSocket"| customer_web
-    admin_ui <-->|"ROS DDS"| admin_app
-    customer_web <-->|"TCP"| control
-    admin_app    <-->|"직접 참조"| control
-    control      <-->|"ROS DDS"| core
-    perception   <-->|"TCP"| yolo
-    control      -->|"REST"| llm
+    browser      <-->|"WebSocket (채널 A)"| customer_web
+    admin_ui     <-->|"TCP (채널 B)"| control
+    customer_web <-->|"TCP (채널 C)"| control
+    customer_web <-->|"TCP/REST (채널 D)"| llm
+    control      <-->|"TCP (채널 E)"| control_db
+    control      <-->|"TCP + UDP (채널 F)"| yolo
+    control      <-->|"ROS 2 DDS (채널 G)"| core
+    control      <-->|"ROS 2 + UDP (채널 H)"| pinky
 ```
 
 ---
@@ -59,27 +59,44 @@ graph TD
 
 | 컴포넌트 | 실행 위치 | 역할 |
 |---|---|---|
-| `shoppinkki_core` | Pi 5 | SM + BT 통합 노드. HW 제어(LED, LCD, 부저), Pi DB 관리 |
-| `shoppinkki_perception` | Pi 5 (core import) | YOLO+ReID / ArUco 추종 / QR 스캔 / 포즈 스캔 |
-| `shoppinkki_nav` | Pi 5 (core import) | BTWaiting / BTGuiding / BTReturning / BoundaryMonitor |
+| `shoppinkki_core` | Pi 5 | SM + BT 통합 노드. HW 제어(LED, LCD, 부저) |
+| `shoppinkki_perception` | Pi 5 | YOLO+ReID / ArUco 추종 / QR 스캔 / 포즈 스캔 |
+| `shoppinkki_nav` | Pi 5 | BTWaiting / BTGuiding / BTReturning / BoundaryMonitor |
+| `pinky_pro packages` | Pi 5 | 모터 드라이버, 오도메트리, TF, LiDAR, 카메라 원시 데이터 |
 | `Nav2 스택` | Pi 5 | AMCL 위치 추정, 경로 계획, `/scan` `/amcl_pose` 발행 |
-| `control_service` | 서버 PC | ROS2 노드 + TCP 서버(8080) + REST API. Control DB 관리 |
-| `customer_web` | 서버 PC | Flask + SocketIO. 브라우저 ↔ control_service 중계 |
-| `admin_app` | 서버 PC | PyQt + rclpy. 관제 대시보드 |
-| `yolo` (Docker) | 서버 PC | YOLOv8 추론 서버. Pi 프레임 수신 → 결과 반환 |
-| `llm` (Docker) | 서버 PC | 자연어 상품 검색. control_service REST 요청 처리 |
+| `control_service` | 서버 PC | ROS2 노드 + TCP(8080) + REST API. **Control DB 전체 관리** (SESSION/CART 포함) |
+| `Control DB` | 서버 PC | SQLite. 모든 테이블 중앙 통합 (Pi 로컬 DB 제거) |
+| `customer_web` | 서버 PC | Flask + SocketIO. 브라우저 ↔ control_service 중계. **LLM 직접 호출** |
+| `Admin UI` | **별도 관제 기기** | TCP로 control_service에 연결하는 독립 클라이언트 |
+| `yolo` (Docker) | 서버 PC | YOLOv8 추론 서버. **영상 UDP 수신 → 결과 TCP 반환** |
+| `llm` (Docker) | 서버 PC | 자연어 상품 검색. customer_web REST 요청 처리 |
 
 ---
 
 ## 통신 채널
 
-| 채널 | 연결 | 프로토콜 | 방향 |
-|---|---|---|---|
-| A | Customer UI ↔ customer_web | WebSocket (SocketIO) | 양방향 |
-| B | customer_web ↔ control_service | TCP (localhost:8080, JSON 개행 구분) | 양방향 |
-| C | Pi 5 ↔ control_service | ROS DDS (`ROS_DOMAIN_ID=14`) | 양방향 |
-| D | admin_app ↔ control_service | 직접 참조 (동일 서버 PC 내, 별도 통신 없음) | 양방향 |
-| E | shoppinkki_perception → yolo | TCP (서버PC:5005) | 양방향 |
-| F | control_service → llm | REST HTTP (localhost:8000) | 단방향 |
+| 채널 | 연결 | 프로토콜 | 방향 | 설계 이유 |
+|---|---|---|---|---|
+| A | Customer UI ↔ customer_web | WebSocket (SocketIO) | 양방향 | 로봇 상태·위치를 새로고침 없이 실시간 Push |
+| B | **Admin UI ↔ control_service** | **TCP** | 양방향 | 관리자 명령 유실 불허 → 신뢰성 최우선. 별도 기기에서 연결 |
+| C | customer_web ↔ control_service | TCP (localhost:8080, JSON 개행 구분) | 양방향 | 기존과 동일 |
+| D | **customer_web ↔ LLM** | **TCP (REST HTTP, :8000)** | 양방향 | 자연어 검색을 customer_web이 직접 처리 |
+| E | **control_service ↔ Control DB** | **TCP** | 양방향 | DB가 독립 서비스로 분리 |
+| F | **control_service ↔ YOLO** | **TCP + UDP 하이브리드** | 양방향 | 영상 데이터(무거움) → UDP / 인식 결과(좌표) → TCP |
+| G | control_service ↔ shoppinkki packages | ROS 2 DDS (`ROS_DOMAIN_ID=14`) | 양방향 | 비즈니스 로직 명령·상태 발행/구독 |
+| H | control_service ↔ pinky_pro packages | **ROS 2 + UDP** | 양방향 | 주행 명령 → ROS / 원시 카메라·센서 데이터 → UDP |
 
 > 각 채널의 메시지 포맷 상세: [`docs/interface_specification.md`](interface_specification.md)
+
+---
+
+## 주요 아키텍처 변경 이력
+
+| 항목 | 변경 전 | 변경 후 |
+|---|---|---|
+| Admin 연결 방식 | 동일 프로세스 직접 참조 (채널 D) | **별도 기기 TCP 연결 (채널 B)** |
+| LLM 접근 주체 | control_service | **customer_web** |
+| YOLO 접근 주체 | Pi (카메라 → TCP 직접 전송) | **control_service (UDP 영상 수신 후 처리)** |
+| 카메라 데이터 전송 | Pi 내부 처리 후 결과만 전송 | **Pi → 서버 UDP 스트리밍** |
+| Pi 로컬 DB | SQLite (pi.db) — SESSION/CART/POSE_DATA | **제거 → Control DB 통합** |
+| Control DB 위치 | control_service 내부 | **독립 서비스 (TCP 접근)** |
