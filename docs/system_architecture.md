@@ -37,7 +37,7 @@
 | `control_service` | 서버 PC | ROS2 노드 + TCP(8080) + REST API. **Control DB 전체 관리** (SESSION/CART 포함) |
 | `Control DB` | 서버 PC | SQLite. 모든 테이블 중앙 통합 (Pi 로컬 DB 제거) |
 | `customer_web` | 서버 PC | Flask + SocketIO. 브라우저 ↔ control_service 중계. **LLM 직접 호출** |
-| `Admin UI` | **별도 관제 기기** | TCP로 control_service에 연결하는 독립 클라이언트 |
+| `Admin UI` | 서버 PC | TCP로 control_service에 연결하는 관제 앱 (별도 앱 존재 가정) |
 | `yolo` (Docker) | 서버 PC | YOLOv8 추론 서버. **영상 UDP 수신 → 결과 TCP 반환** |
 | `llm` (Docker) | 서버 PC | 자연어 상품 검색. customer_web REST 요청 처리 |
 
@@ -58,15 +58,3 @@
 
 > 각 채널의 메시지 포맷 상세: [`docs/interface_specification.md`](interface_specification.md)
 
----
-
-## 주요 아키텍처 변경 이력
-
-| 항목 | 변경 전 | 변경 후 |
-|---|---|---|
-| Admin 연결 방식 | 동일 프로세스 직접 참조 (채널 D) | **별도 기기 TCP 연결 (채널 B)** |
-| LLM 접근 주체 | control_service | **customer_web** |
-| YOLO 접근 주체 | Pi (카메라 → TCP 직접 전송) | **control_service (UDP 영상 수신 후 처리)** |
-| 카메라 데이터 전송 | Pi 내부 처리 후 결과만 전송 | **Pi → 서버 UDP 스트리밍** |
-| Pi 로컬 DB | SQLite (pi.db) — SESSION/CART/POSE_DATA | **제거 → Control DB 통합** |
-| Control DB 위치 | control_service 내부 | **독립 서비스 (TCP 접근)** |
