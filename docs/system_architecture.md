@@ -21,7 +21,7 @@
 
 ## 전체 구성
 
-![System Architecture](./SA.png)
+![System Architecture](./system_architecture.png)
 
 ---
 
