@@ -42,6 +42,22 @@
 
 ---
 
+## 복귀 통행 제한 구역 (Keepout Filter)
+
+로봇이 **RETURNING / TOWARD_STANDBY** 상태일 때만 적용되는 Nav2 Keepout Filter 마스크입니다.
+`shoppinkki_nav/config/keepout_mask.pgm` 에 흰색(255) 픽셀로 표시하며,
+`lifecycle_manager_filter`(autostart=false)를 통해 BTReturning이 동적으로 활성/비활성화합니다.
+
+| 구역 | 설명 | 마스크 처리 |
+|---|---|---|
+| 상품 진열대 통로 (zone 1~8 사이 공간) | 쇼핑 중인 고객과 충돌 방지 | 흰색 (통행 금지) |
+| 메인 복귀 통로 | 대기열(zone 140~142)로 이어지는 지정 경로 | 검정 (통행 가능) |
+
+> **마스크 작성 방법:** `shop.pgm`을 복사 후 GIMP 등으로 금지 구역을 흰색으로 칠한다.
+> 실측 맵 완성 후 좌표를 확인하여 `keepout_mask.yaml`의 resolution/origin과 일치시킬 것.
+
+---
+
 ## 도난 감지 경계
 
 마트 내부 전체 영역을 벗어나면 도난으로 판정합니다.

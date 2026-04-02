@@ -125,15 +125,17 @@ class ControlServiceNode(rclpy.node.Node):
     def _on_alarm(self, robot_id: int, msg):
         data = json.loads(msg.data)
         event_type = data.get('event')  # "THEFT" | "BATTERY_LOW" | "TIMEOUT" | "PAYMENT_ERROR"
-        user_id = data.get('user_id', '')
-        now = datetime.now().isoformat()
+        user_id = data.get('user_id', '') or None
+        now = datetime.now()
 
         # ALARM_LOG INSERT
-        with self._db_lock:
-            self.db.execute("""
-                INSERT INTO alarm_log (robot_id, user_id, event_type, occurred_at, resolved_at)
-                VALUES (?, ?, ?, ?, NULL)
+        with get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO alarm_log (robot_id, user_id, event_type, occurred_at)
+                VALUES (%s, %s, %s, %s)
             """, (robot_id, user_id, event_type, now))
+            conn.commit()
 
         # 채널 B: admin_ui에 TCP push
         self._tcp_push_admin({
@@ -151,17 +153,15 @@ class ControlServiceNode(rclpy.node.Node):
             self._dismiss_alarm(robot_id)
 
     def _dismiss_alarm(self, robot_id: int):
-        now = datetime.now().isoformat()
-        # ⚠️ SQLite는 UPDATE에서 ORDER BY + LIMIT 미지원 → 서브쿼리 사용
-        with self._db_lock:
-            self.db.execute("""
-                UPDATE alarm_log SET resolved_at=?
-                WHERE log_id = (
-                    SELECT log_id FROM alarm_log
-                    WHERE robot_id=? AND resolved_at IS NULL
-                    ORDER BY occurred_at DESC LIMIT 1
-                )
-            """, (now, robot_id))
+        # MySQL: UPDATE ... ORDER BY ... LIMIT 1 직접 지원
+        with get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE alarm_log SET resolved_at=%s
+                WHERE robot_id=%s AND resolved_at IS NULL
+                ORDER BY occurred_at DESC LIMIT 1
+            """, (datetime.now(), robot_id))
+            conn.commit()
 
         # Pi에 dismiss_alarm 전달
         self._ros_publish(robot_id, json.dumps({"cmd": "dismiss_alarm"}))
@@ -230,7 +230,7 @@ def on_cmd(self, msg):
 
 | # | 항목 | 내용 | 처리 |
 |---|---|---|---|
-| 1 | **SQLite UPDATE ORDER BY** | `UPDATE ... ORDER BY ... LIMIT 1` — SQLite 미지원 | 서브쿼리로 `log_id` 먼저 조회 후 UPDATE |
+| 1 | **MySQL UPDATE ORDER BY** | `UPDATE ... ORDER BY ... LIMIT 1` — MySQL에서 직접 지원 | 서브쿼리 불필요. 직접 사용 가능 |
 | 2 | **다중 미해결 ALARM_LOG** | 같은 robot_id에 `resolved_at IS NULL` 행이 여러 개일 수 있음 | dismiss는 가장 최근 발생 알람 1개만 해제. Pi의 `current_alarm`이 authoritative source |
 | 3 | **admin_ui Thread Safety** | TCP 수신 스레드 → Qt 메인 스레드 갱신 | `pyqtSignal.emit()` 패턴 필수 (scenario_13과 동일) |
 | 4 | **customer_web dismiss 알림** | `dismiss_alarm` 후 customer_web에도 `{"type": "alarm_dismissed"}` push 필요 | control_service의 `_dismiss_alarm()`에서 `_tcp_push_customer()` 추가 |

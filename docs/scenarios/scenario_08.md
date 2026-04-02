@@ -20,12 +20,14 @@
 | [ ] | 장바구니에 물건 있음 → `send_event('returning_blocked')` → 브라우저 알림 (SM 유지) |
 | [ ] | `on_enter_RETURNING`: `bt_runner.stop()` — 기존 BT(BTWaiting/BTTracking) 중단 |
 | [ ] | `on_enter_RETURNING`: BTReturning 시작 |
+| [ ] | BTReturning: Keepout Filter 활성화 (`/lifecycle_manager_filter/manage_nodes` STARTUP) |
 | [ ] | BTReturning: `GET /queue/assign?robot_id=<id>` → zone_id 수신 (140 \| 141 \| 142) |
 | [ ] | BTReturning: `sm.trigger('to_toward_standby_X')` (zone에 따라 1\|2\|3) → TOWARD_STANDBY_X |
 | [ ] | BTReturning: `GET /zone/<zone_id>/waypoint` → Waypoint 조회 |
-| [ ] | BTReturning: Nav2 Goal 전송 (배정된 대기열 위치) |
-| [ ] | BTReturning: Nav2 `SUCCEEDED` → `sm.trigger('standby_arrived')` → STANDBY_X |
-| [ ] | BTReturning: Nav2 `FAILED` → `sm.trigger('nav_failed')` → ALARM |
+| [ ] | BTReturning: Nav2 Goal 전송 (배정된 대기열 위치, Keepout Filter 적용 경로) |
+| [ ] | BTReturning: Nav2 `SUCCEEDED` → Keepout Filter 비활성화 → `sm.trigger('standby_arrived')` → STANDBY_X |
+| [ ] | BTReturning: Nav2 `FAILED` → Keepout Filter 비활성화 → `sm.trigger('nav_failed')` → ALARM |
+| [ ] | `shoppinkki_nav/config/keepout_mask.pgm`: 복귀 통행 제한 구역 마스크 페인팅 (흰색=금지) |
 | [ ] | STANDBY_X: 사용자 카트 수령 대기 (`session_ended` 트리거 대기) |
 | [ ] | `sm.trigger('session_ended')` (사용자 카트 수령 확인) → IDLE |
 | [ ] | `on_enter_IDLE`: `publisher.terminate_session()` 호출 후 즉시 `publish_status(mode="IDLE")` |

@@ -150,6 +150,7 @@ class RobotPublisherInterface(Protocol):
 
 | 방향 | 메시지 | 설명 |
 |---|---|---|
+| admin → control | `{"cmd": "mode", "robot_id": 54, "value": "WAITING"\|"TRACKING"\|"RETURNING"}` | 모드 전환 → Pi `/robot_<id>/cmd` relay |
 | admin → control | `{"cmd": "dismiss_alarm", "robot_id": 54}` | 알람 해제 |
 | admin → control | `{"cmd": "force_terminate", "robot_id": 54}` | 세션 강제 종료 → Pi `{"cmd": "force_terminate"}` relay |
 | admin → control | `{"cmd": "admin_goto", "robot_id": 54, "x": 1.2, "y": 0.8, "theta": 0.0}` | 위치 호출 → Pi relay. IDLE 상태 로봇만 수락 |
@@ -191,10 +192,11 @@ class RobotPublisherInterface(Protocol):
 
 ---
 
-### 채널 E — control_service ↔ Control DB (TCP)
+### 채널 E — control_service ↔ MySQL DB (TCP :3306)
 
-> Control DB가 독립 서비스로 분리. control_service가 TCP로 접근.
-> SESSION / CART / CART_ITEM 포함 전체 테이블 관리.
+> MySQL 서버가 독립 프로세스로 실행. control_service가 `mysql-connector-python`으로 TCP:3306 접속.
+> `shoppinkki` 데이터베이스. SESSION / CART / CART_ITEM 포함 전체 테이블 관리.
+> 연결 설정: 환경 변수 `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE`
 
 ---
 

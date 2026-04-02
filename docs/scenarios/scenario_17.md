@@ -102,16 +102,18 @@ class ControlServiceNode(rclpy.node.Node):
 
     def log_event(self, event_type: str, robot_id: int = None,
                   user_id: str = None, detail: dict = None):
-        now = datetime.now().isoformat()
+        now = datetime.now()
         detail_json = json.dumps(detail, ensure_ascii=False) if detail else None
 
-        # ⚠️ 모순 #2: cleanup 스레드에서도 log_event() 호출 가능
-        # → DB Lock 필요 (scenario_16 모순 #2와 동일 문제)
-        with self._db_lock:
-            self.db.execute("""
+        # MySQL connection pool이 스레드 동시 접근 관리
+        # (ROS 스레드, cleanup 스레드, Flask 스레드 모두 pool에서 별도 연결 획득)
+        with get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
                 INSERT INTO event_log (robot_id, user_id, event_type, event_detail, occurred_at)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s)
             """, (robot_id, user_id, event_type, detail_json, now))
+            conn.commit()
 
         # 채널 B TCP push → admin_ui
         self._tcp_push_admin({
@@ -228,7 +230,7 @@ class AdminMainWindow(QMainWindow):
 | # | 항목 | 내용 | 처리 |
 |---|---|---|---|
 | 1 | **ALARM_LOG 중복** | ALARM_RAISED/DISMISSED를 EVENT_LOG에 기록하면 ALARM_LOG와 이중 저장됨 | EVENT_LOG의 ALARM 이벤트는 참조용 요약 기록. ALARM_LOG가 원본(resolved_at 포함). 조회 시 ALARM_LOG 우선 |
-| 2 | **DB Lock 필요** | log_event()는 ROS 스레드, cleanup 스레드 등 여러 스레드에서 호출됨 | `threading.Lock()` (`self._db_lock`) 으로 모든 DB 접근 보호 (scenario_16 모순 #2 통합) |
+| 2 | **스레드 동시 접근** | log_event()는 ROS 스레드, cleanup 스레드 등 여러 스레드에서 호출됨 | MySQL connection pool (pool_size=5). 각 스레드가 pool에서 별도 연결 획득 → DB 단위 Lock 불필요 |
 | 3 | **MODE_CHANGE 로깅 시점** | control_service는 Pi SM 전환을 `/robot_<id>/status`의 `mode` 필드 변경으로만 감지함. 50ms 이하 짧은 상태는 누락 가능 | demo 용도로 1~2Hz 갱신 주기 내 변경만 기록. 중요 이벤트(ALARM, SESSION)는 즉시 토픽으로 별도 수신하므로 누락 없음 |
 | 4 | **EVENT_LOG ERD** | `docs/erd.md`에 EVENT_LOG 테이블 없었음 | ✅ 해결 — erd.md에 EVENT_LOG 테이블 추가 완료 |
 | 5 | **REST `/events` 채널 미정의** | `interface_specification.md` 채널 E에 `/events` 엔드포인트 없음 | interface_specification.md 채널 E 추가 필요 |
