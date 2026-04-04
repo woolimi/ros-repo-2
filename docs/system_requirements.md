@@ -49,7 +49,7 @@
 |---|---|---|
 | SR-30 | 전체 | 로봇 동작 모드는 10개 상태(CHARGING / IDLE / TRACKING / TRACKING_CHECKOUT / GUIDING / SEARCHING / WAITING / LOCKED / RETURNING / HALTED)로 정의된 State Machine으로 관리한다. (`docs/state_machine.md` 참조) |
 | SR-31 | UR-14 | 배터리 잔량이 임계값 이하로 떨어지면 **어떤 상태에서든** (`source='*'`) 즉시 `enter_halted` 전환을 수행하여 그 자리에서 정지한다. 앱과 LCD에 배터리 부족 알림을 표시한다. |
-| SR-32 | UR-40 | BoundaryMonitor가 AMCL pose 기준으로 결제 구역(ID 150) 진입을 감지하면 SM 상태는 TRACKING을 유지한 채 앱에 결제 알람 팝업을 전송하고 LCD를 결제 QR 코드 화면으로 전환한다. |
+| SR-32 | UR-40 | BoundaryMonitor가 AMCL pose 기준으로 결제 구역(ID 150) 진입을 감지하면 SM 상태는 TRACKING을 유지한 채 앱에 결제 알람 팝업을 전송하고 LCD에 결제 진행 안내 메시지를 표시한다. |
 | SR-32a | UR-40a | 결제 미완료(TRACKING) 상태에서 BoundaryMonitor가 출구 방향 경계 초과를 감지하면 로봇을 정지시키고 앱에 결제 필요 알림을 표시한다. 결제 완료 후 `enter_tracking_checkout` 전환을 수행하여 출구 통과를 허용한다. |
 | SR-32b | UR-40b | TRACKING_CHECKOUT 상태에서 로봇이 결제 구역 안쪽으로 복귀하면 `enter_tracking` 전환을 수행한다. Cart 테이블에서 이미 결제된 항목(`is_paid=1`)과 미결제 항목(`is_paid=0`)을 구분하여 관리하며, 다음 결제 시 미결제 항목만 결제 대상으로 처리한다. |
 | SR-33 | UR-42 | "보내주기" 명령 수신 시(TRACKING, TRACKING_CHECKOUT, WAITING 상태) 미결제 항목 없음 → `enter_returning`, 미결제 항목 있음 → `enter_locked` 전환을 수행한다. |
@@ -129,7 +129,7 @@
 
 | SR ID | 연관 UR | Description |
 |---|---|---|
-| SR-80 | UR-01 | LCD에 표시되는 QR 코드는 Mini Server(Customer Web) 주소를 인코딩한다. |
+| SR-80 | UR-01 | LCD에 표시되는 QR 코드는 Mini Server(Customer Web) 주소를 인코딩한다. IDLE 상태에서만 표시되며, 다른 상태에서는 QR 코드 대신 상태 안내 메시지가 표시된다. |
 | SR-81 | UR-20 | Customer Web은 Control Device와 TCP(채널 C)로 연결하여 모든 로봇의 상태(위치, 모드, 배터리 잔량, is_locked_return)를 실시간으로 수신한다. |
 | SR-82 | UR-20 | 웹앱 맵에서 본인 로봇은 불투명 마커로, 타 로봇은 투명도를 낮춘 마커로 표시한다. |
 | SR-83 | UR-32 | 웹앱의 물건 찾기 STT 기능은 브라우저 Web Speech API를 사용한다. |

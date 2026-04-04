@@ -163,7 +163,7 @@ class RobotPublisherInterface(Protocol):
 | admin → control | `{"cmd": "force_terminate", "robot_id": 54}` | 강제 종료 |
 | admin → control | `{"cmd": "staff_resolved", "robot_id": 54}` | 잠금 해제 / 초기화 |
 | admin → control | `{"cmd": "admin_goto", "robot_id": 54, "x": 1.2, "y": 0.8, "theta": 0.0}` | IDLE 상태에서 Nav2 직접 목표 |
-| control → admin | `{"type": "status", "robot_id": 54, "mode": "TRACKING", "pos_x": 1.2, "pos_y": 0.8, "battery": 72, "is_locked_return": false}` | 1~2Hz push |
+| control → admin | `{"type": "status", "robot_id": 54, "mode": "TRACKING", "pos_x": 1.2, "pos_y": 0.8, "battery": 72, "is_locked_return": false, "bbox": {"cx": 320, "cy": 240, "w": 180, "h": 230, "conf": 0.92}}` | 1~2Hz push. `bbox`는 추종 중(TRACKING / TRACKING_CHECKOUT)일 때만 포함, 미감지 시 null |
 | control → admin | `{"type": "staff_call", "robot_id": 54, "event_type": "LOCKED"\|"HALTED", "occurred_at": "..."}` | 직원 호출 이벤트 |
 | control → admin | `{"type": "staff_resolved", "robot_id": 54}` | 처리 완료 확인 |
 | control → admin | `{"type": "offline", "robot_id": 54}` | 오프라인 감지 |
@@ -280,5 +280,8 @@ customer_web과 Nav2 BT가 control_service에 질의하는 내부 API.
 | DELETE | `/cart/<session_id>/item/<item_id>` | `{"ok": true}` | CART_ITEM 삭제 |
 | PATCH | `/cart/<session_id>/items/mark_paid` | `{"ok": true}` | `is_paid=0` 전체 → 1 (결제 완료) |
 | GET | `/cart/<session_id>/has_unpaid` | `{"has_unpaid": true}` | 미결제 항목 존재 여부 |
+| GET | `/camera/<robot_id>` | MJPEG 스트림 | 로봇 카메라 영상 스트림 (Content-Type: multipart/x-mixed-replace) |
+
+> **`/camera/<robot_id>`:** control_service가 채널 H(UDP)로 수신한 카메라 프레임을 MJPEG 형식으로 re-stream. Admin UI에서 QThread로 구독하여 카메라 디버그 패널에 표시. 해당 로봇이 오프라인이거나 스트림이 없으면 HTTP 503 반환.
 
 > **`/zone/parking/available`:** ROBOT 테이블에서 `current_mode != 'OFFLINE'`이고 `pos_x`, `pos_y`가 슬롯 140/141 waypoint 반경 이내인 로봇 수를 확인하여 빈 슬롯 ID를 반환. 두 슬롯 모두 사용 중이면 140 반환(대기).

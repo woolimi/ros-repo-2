@@ -203,16 +203,14 @@
 │  ──────────────────────     │
 │  합계         3,500원       │
 │                             │
-│  LCD의 QR을 스캔하여        │
-│  결제를 진행해주세요.        │
-│                             │
+│  [ 결제하기 ]               │
 │  [ 계속 쇼핑하기 ]          │
 └─────────────────────────────┘
 ```
 
 - BoundaryMonitor 결제 구역 진입 시 자동 표시 (`checkout_zone_enter` WebSocket 수신)
 - **SM 상태는 TRACKING 유지** — 결제 완료 전까지 출구 통과 불가
-- 결제는 LCD에 표시된 QR 코드를 스캔하여 진행
+- **[결제하기]** — 등록된 카드로 가상 결제 진행 → `{"cmd": "payment"}` 전송
 - 결제 완료(`payment_done` WebSocket 수신) → 팝업 닫힘, 모드 뱃지 TRACKING_CHECKOUT으로 전환
 - **[계속 쇼핑하기]** — 팝업 닫기, TRACKING 상태로 계속 쇼핑 (결제 구역 통과 불가 상태 유지)
 - 미결제 상태에서 출구 방향 이동 시도 시 → "결제 후 통과 가능합니다" 알림 토스트
@@ -346,8 +344,8 @@ px_y = img_height_px - (pos_y - origin_y) / resolution   # Y축 반전
   │      └─ 타임아웃 → 미결제 물건 있으면 LOCKED, 없으면 RETURNING             │
   │                                                                            │
   │  결제 구역 진입 (자동, TRACKING 상태 유지)                                 │
-  │      → 결제 팝업 표시 + LCD 결제 QR                                        │
-  │      ├─ LCD QR 결제 완료 → TRACKING_CHECKOUT 전환                          │
+  │      → 결제 팝업 표시 (LCD: 결제 안내 메시지)                              │
+  │      ├─ [결제하기] 클릭 → 가상 결제 → TRACKING_CHECKOUT 전환               │
   │      │     └─ 출구 통과 가능. 결제구역 재진입 시 TRACKING으로 복귀          │
   │      └─ [계속 쇼핑] → 팝업 닫기 (출구 통과 여전히 불가)                   │
   │                                                                            │

@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **쑈삥끼 (ShopPinkki)** — Pinky Pro 로봇을 활용한 미니어처 마트 스마트 카트 데모 프로젝트.
 - Robot platform: Pinky Pro (110×120×142mm), Raspberry Pi 5 (8GB)
-- Demo environment: 1.4×1.8m miniature shopping mall
+- Demo environment: 1.8×1.4m miniature shopping mall
 - ROS 2 Jazzy / Ubuntu 24.04
 - Two robots: Pinky #54 (`192.168.102.54`), Pinky #18 (`192.168.102.18`)
-- **추종 방식:** 인형 전용 custom-trained YOLOv8로 인형 클래스 감지 후, ReID 특징 벡터 + 색상 히스토그램 매칭으로 주인 인형 식별, P-Control 추종
+- **추종 방식:** 인형 전용 custom-trained YOLOv8(AI Server)로 인형 클래스 감지 후, Pi 5 로컬에서 ReID 특징 벡터 + HSV 색상 히스토그램 매칭으로 주인 인형 식별, P-Control 추종
 
 ## Build
 
@@ -32,7 +32,7 @@ source install/setup.zsh
 ```bash
 pip install transitions              # SM 라이브러리 (shoppinkki_core)
 pip install flask flask-socketio     # customer_web
-pip install ultralytics              # YOLO (shoppinkki_perception)
+pip install ultralytics              # YOLO (ai_server)
 pip install mysql-connector-python   # control_service DB 접속
 ```
 
@@ -125,9 +125,9 @@ ros_ws/
 │   │   ├── shoppinkki_interfaces/   ← 인터페이스 + Mock 구현체
 │   │   ├── shoppinkki_core/         ← 메인 노드 (SM + BT + HW)
 │   │   ├── shoppinkki_nav/          ← Nav2 BT + BoundaryMonitor + shop 맵
-│   │   └── shoppinkki_perception/   ← 커스텀 YOLO 인형 감지 + QR 스캔
+│   │   └── shoppinkki_perception/   ← YOLO bbox 수신 + ReID/QR 스캔
 │   └── control_center/     ← 서버 PC 실행 ROS2 패키지
-│       ├── control_service/         ← ROS2 노드 + TCP(8080) + REST API + 중앙 DB
+│       ├── control_service/         ← ROS2 노드 + TCP(8080) + REST API + 중앙 MySQL DB
 │       └── admin_ui/                ← TCP 관제 클라이언트 (별도 기기 또는 프로세스)
 ├── services/
 │   ├── customer_web/        ← Flask + SocketIO 고객 웹앱 (포트 8501)
@@ -153,13 +153,13 @@ ros_ws/
 
 **`src/shoppinkki/`** provides application logic (Pi 5 실행):
 - `shoppinkki_interfaces` — Python Protocol 인터페이스 + Mock 구현체 (`protocols.py`, `mocks.py`)
-- `shoppinkki_core` — 메인 노드. SM(18개 상태) + BT Runner + HW 제어(LED, LCD, 부저)
-- `shoppinkki_nav` — Nav2 기반 BT (BTWaiting, BTGuiding, BTReturning, BTStandBy) + BoundaryMonitor. shop 맵 포함. **Keepout Filter**: `config/keepout_mask.yaml` + `lifecycle_manager_filter`(autostart=false) — BTReturning 진입 시 활성화, 완료/실패 시 비활성화
-- `shoppinkki_perception` — 커스텀 YOLO 인형 감지 (`DollDetector`) + QR 스캔
+- `shoppinkki_core` — 메인 노드. SM(10개 상태) + BT Runner + HW 제어(LED, LCD, 부저)
+- `shoppinkki_nav` — Nav2 기반 BT (BTTracking, BTSearching, BTWaiting, BTGuiding, BTReturning) + BoundaryMonitor. shop 맵 포함. **Keepout Filter**: `config/keepout_mask.yaml` + `lifecycle_manager_filter`(autostart=false) — BTReturning(RETURNING/LOCKED 귀환) 진입 시 활성화, 완료/실패 시 비활성화
+- `shoppinkki_perception` — AI Server로부터 bbox 수신 후 ReID + HSV 색상 매칭 (`DollDetector`) + QR 스캔
 
 **`src/control_center/`** provides server-side logic (서버 PC 실행):
-- `control_service` — ROS2 노드 + TCP 서버(8080) + REST API(8080) + 중앙 MySQL DB. Pi ↔ customer_web 중계. `QueueManager` 포함
-- `admin_ui` — TCP 클라이언트 관제 앱. control_service 채널 B(TCP)로 연결. 별도 기기 또는 프로세스로 실행
+- `control_service` — ROS2 노드 + TCP 서버(8080) + REST API(8080) + 중앙 MySQL DB. Pi ↔ customer_web 중계. 충전소 슬롯 배정(`/zone/parking/available`) 포함
+- `admin_ui` — TCP 클라이언트 관제 앱. control_service 채널 B(TCP)로 연결. 별도 기기 또는 프로세스로 실행. **카메라 디버그 패널**: `GET /camera/<robot_id>` MJPEG 스트림 + bbox 오버레이로 추종 동작 시각화
 
 **`services/`** provides non-ROS services:
 - `customer_web` — Flask + SocketIO 고객 웹앱 (**포트 8501**). 스마트폰 브라우저용. LLM 직접 호출(채널 D)
@@ -167,37 +167,43 @@ ros_ws/
 
 ### Application Architecture
 
-- **추종 방식:** 인형 전용 custom-trained YOLOv8 (단일 모드). REGISTERING 시 인형 감지 + ReID/색상 템플릿 등록 완료 후 TRACKING 진입.
-- **State Machine (SM):** 18개 상태 — BATTERY_CHECK, CHARGING, IDLE, REGISTERING, TRACKING, SEARCHING, WAITING, ITEM_ADDING, GUIDING, CHECK_OUT, RETURNING, TOWARD/STANDBY 1~3, ALARM
-- **Behavior Trees:** BT1=TRACKING(P-Control), BT2=SEARCHING(회전 탐색), BT3=WAITING(통행 회피), BT4=GUIDING(Nav2), BT5=RETURNING+Standby(Nav2 + 대기열 배정)
+- **추종 방식:** IDLE 상태에서 카메라 프레임을 채널 H(UDP) → 채널 F(TCP)로 AI Server YOLO에 전달. bbox 수신 후 Pi 5가 ReID/색상 매칭으로 주인 인형 식별. 등록 완료(`is_ready()`) 시 TRACKING 진입.
+- **State Machine (SM):** 10개 상태 — CHARGING, IDLE, TRACKING, TRACKING_CHECKOUT, GUIDING, SEARCHING, WAITING, LOCKED, RETURNING, HALTED
+- **Behavior Trees:** BT1=TRACKING/TRACKING_CHECKOUT(P-Control + 장애물 회피 Parallel), BT2=SEARCHING(회전 탐색), BT3=WAITING(통행 회피), BT4=GUIDING(Nav2), BT5=RETURNING/LOCKED(Keepout + 슬롯 조회 + Nav2)
+- **is_locked_return 플래그:** LOCKED → RETURNING → CHARGING 경로 전체에서 LED 잠금 신호 유지. `staff_resolved` 수신 시 `False` 초기화 + `terminate_session()`.
+- **LCD 표시 정책:** IDLE 상태만 QR 코드(웹앱 접속용) 표시. 나머지 상태는 텍스트 상태 메시지만 표시 (카메라 영상·QR 없음). 상태별 LCD 내용은 `docs/user_requirements.md` UR-21 테이블 참고.
 - **Communication Channels (A~H):** `docs/system_architecture.md` 기준
   - A: Customer UI ↔ customer_web (WebSocket)
-  - B: Admin UI ↔ control_service (TCP) — admin이 `mode`/`force_terminate`/`admin_goto`/`dismiss_alarm` 명령 전송 가능
+  - B: Admin UI ↔ control_service (TCP) — admin이 `mode`/`resume_tracking`/`force_terminate`/`staff_resolved`/`admin_goto` 명령 전송 가능
   - C: customer_web ↔ control_service (TCP :8080)
   - D: customer_web ↔ LLM (REST :8000)
-  - E: control_service ↔ Control DB (TCP)
-  - F: control_service ↔ YOLO (TCP + UDP 하이브리드)
+  - E: control_service ↔ MySQL DB (TCP :3306)
+  - F: control_service ↔ AI Server YOLO (TCP + UDP 하이브리드)
   - G: control_service ↔ shoppinkki packages (ROS DDS, `ROS_DOMAIN_ID=14`)
-  - H: control_service ↔ pinky_pro packages (ROS DDS + UDP 카메라 스트림)
+  - H: Pi 5 → control_service (UDP 카메라 스트림) + control_service → Pi 5 (ROS DDS `/cmd_vel`)
 
 ### Key SM Transitions (주요 상태 전환)
 
 | Trigger | From → To | 발생 조건 |
 |---|---|---|
-| `start_session` | IDLE → REGISTERING | 로그인 완료, Pi가 `/cmd` 수신 |
-| `registration_done` | REGISTERING → TRACKING | 커스텀 YOLO 인형 첫 감지 (`is_ready()`) |
-| `owner_lost` | TRACKING → SEARCHING | N프레임 연속 미감지 (BT1) |
-| `to_waiting` | TRACKING/SEARCHING → WAITING | 앱 명령 / 탐색 타임아웃 |
-| `enter_checkout` | TRACKING → CHECK_OUT | BoundaryMonitor 결제 구역(ID 150) 진입 |
-| `payment_success` | CHECK_OUT → RETURNING | 가상 결제 성공 |
-| `payment_error` | CHECK_OUT → ALARM | 가상 결제 실패 |
-| `battery_low` | ANY → ALARM | 배터리 ≤ 20% |
-| `zone_out` | ANY → ALARM | shop_boundary 이탈 (THEFT) |
-| `dismiss_to_idle` | ALARM → IDLE | THEFT 알람 해제 |
-| `dismiss_to_waiting` | ALARM → WAITING | BATTERY_LOW/TIMEOUT/PAYMENT_ERROR 해제 |
-| `queue_advance` | STANDBY_3→2, STANDBY_2→1 | QueueManager 큐 전진 신호 |
-| `session_ended` | STANDBY_1 → IDLE | 사용자 카트 수령 + 세션 종료 |
-| `admin_force_idle` | **ANY** → IDLE | 관제 강제 종료. `machine.add_transition('admin_force_idle', source='*', dest='IDLE')` |
+| `charging_completed` | CHARGING → IDLE | 충전 완료 |
+| `enter_tracking` | IDLE → TRACKING | 주인 인형 등록 완료 (`is_ready()`) |
+| `enter_searching` | TRACKING / TRACKING_CHECKOUT → SEARCHING | N프레임 연속 미감지 (BT1) |
+| `enter_guiding` | TRACKING / TRACKING_CHECKOUT → GUIDING | 앱 상품 안내 요청 |
+| `enter_waiting` | GUIDING → WAITING | Nav2 목적지 도착 (BT4 SUCCESS). 앱 `arrived` 전송 |
+| `enter_waiting` | TRACKING → WAITING | 앱 [대기하기] 요청 |
+| `enter_waiting` | SEARCHING → WAITING | 탐색 타임아웃 (30s) |
+| `resume_tracking()` | WAITING / GUIDING(실패) → TRACKING 또는 TRACKING_CHECKOUT | `previous_tracking_state` 기반 복귀 |
+| `enter_tracking_checkout` | TRACKING → TRACKING_CHECKOUT | 결제 완료 (`payment_success` cmd) |
+| `enter_tracking` | TRACKING_CHECKOUT → TRACKING | BoundaryMonitor 결제구역 재진입 |
+| `enter_locked` | TRACKING / TRACKING_CHECKOUT / WAITING → LOCKED | 보내주기 + 미결제 항목 있음 |
+| `enter_returning` | TRACKING / TRACKING_CHECKOUT / WAITING → RETURNING | 보내주기 + 빈 카트 |
+| `enter_returning` | LOCKED → RETURNING | LOCKED 진입 즉시 자동 귀환 |
+| `enter_charging` | RETURNING → CHARGING | 충전소 도착 (BT5 Nav2 성공) |
+| `enter_halted` | **ANY** → HALTED | 배터리 임계값 이하 (`source='*'`) |
+| `staff_resolved` | HALTED → CHARGING | 스태프 수동 처리 완료 |
+
+> `force_terminate` (관제): 임의 활성 상태 → CHARGING. HALTED·LOCKED·CHARGING·OFFLINE 상태에서는 Admin UI 버튼 비활성화.
 
 ### Key Topics (Pi ↔ control_service, 채널 G ROS DDS)
 
@@ -207,23 +213,23 @@ ros_ws/
 | `/odom` | `nav_msgs/Odometry` | Wheel encoder odometry |
 | `/scan` | `sensor_msgs/LaserScan` | RPLiDAR C1 scans |
 | `/amcl_pose` | `geometry_msgs/PoseWithCovarianceStamped` | AMCL localization |
-| `/robot_<id>/status` | `std_msgs/String` | Pi→control: `{"mode":..., "pos_x":..., "pos_y":..., "battery":...}` (1~2Hz) |
-| `/robot_<id>/alarm` | `std_msgs/String` | Pi→control: `{"event": "THEFT"\|"BATTERY_LOW"\|"TIMEOUT"\|"PAYMENT_ERROR", "user_id": "..."}` |
-| `/robot_<id>/cart` | `std_msgs/String` | Pi→control: `{"items": [...]}` |
+| `/robot_<id>/status` | `std_msgs/String` | Pi→control: `{"mode":..., "pos_x":..., "pos_y":..., "battery":..., "is_locked_return":...}` (1~2Hz) |
+| `/robot_<id>/alarm` | `std_msgs/String` | Pi→control: `{"event": "LOCKED"\|"HALTED"}` |
+| `/robot_<id>/cart` | `std_msgs/String` | Pi→control: `{"items": [{"id":..., "name":..., "price":..., "is_paid":...}]}` |
 | `/robot_<id>/cmd` | `std_msgs/String` | control→Pi: 아래 cmd 목록 참고 |
 
 **`/robot_<id>/cmd` 페이로드 목록:**
 
 | cmd | 페이로드 | 동작 |
 |---|---|---|
-| `start_session` | `{"cmd": "start_session", "user_id": "..."}` | SM: IDLE → REGISTERING |
-| `mode` | `{"cmd": "mode", "value": "WAITING"\|"TRACKING"\|"RETURNING"\|"ITEM_ADDING"}` | SM 전환 |
-| `navigate_to` | `{"cmd": "navigate_to", "zone_id": 6}` | SM → GUIDING |
-| `dismiss_alarm` | `{"cmd": "dismiss_alarm"}` | ALARM → IDLE(THEFT) 또는 WAITING(기타) |
-| `payment_error` | `{"cmd": "payment_error"}` | CHECK_OUT → ALARM |
+| `start_session` | `{"cmd": "start_session", "user_id": "..."}` | CHARGING → IDLE |
+| `mode` | `{"cmd": "mode", "value": "WAITING"\|"RETURNING"}` | SM 전환 |
+| `resume_tracking` | `{"cmd": "resume_tracking"}` | `sm.resume_tracking()` → TRACKING 또는 TRACKING_CHECKOUT |
+| `navigate_to` | `{"cmd": "navigate_to", "zone_id": 6, "x": 1.2, "y": 0.8, "theta": 0.0}` | SM → GUIDING + Nav2 Goal |
+| `payment_success` | `{"cmd": "payment_success"}` | TRACKING → TRACKING_CHECKOUT + `mark_items_paid()` |
 | `delete_item` | `{"cmd": "delete_item", "item_id": 3}` | 장바구니 항목 삭제 |
-| `force_terminate` | `{"cmd": "force_terminate"}` | ANY → IDLE (관제 강제 종료) |
-| `queue_advance` | `{"cmd": "queue_advance"}` | STANDBY_X → 앞 위치로 이동 |
+| `force_terminate` | `{"cmd": "force_terminate"}` | 세션 종료 → CHARGING |
+| `staff_resolved` | `{"cmd": "staff_resolved"}` | `is_locked_return=False` + 세션 종료 → CHARGING |
 | `admin_goto` | `{"cmd": "admin_goto", "x": 1.2, "y": 0.8, "theta": 0.0}` | IDLE 상태에서 Nav2 직접 목표 전송 |
 
 ### Key Services (pinky_interfaces)
@@ -239,34 +245,35 @@ ros_ws/
 | 테이블 | 주요 컬럼 | 용도 |
 |---|---|---|
 | `USER` | user_id, password_hash | 사용자 계정 |
-| `CARD` | card_id, user_id | 결제 카드 정보 |
+| `CARD` | card_id, user_id | 결제 카드 정보 (가상 결제용) |
 | `ZONE` | zone_id, zone_name, zone_type, waypoint_x/y/theta | 구역 Waypoint. zone_type: `product`(1~8) / `special`(100~) |
 | `PRODUCT` | product_id, product_name, zone_id | 상품명 → 구역 매핑 |
-| `BOUNDARY_CONFIG` | description, x_min/max, y_min/max | 도난 경계 + 결제 구역 좌표 |
-| `ROBOT` | robot_id, ip_address, current_mode, pos_x/y, battery_level, last_seen, active_user_id | 로봇 실시간 상태 |
-| `ALARM_LOG` | robot_id, user_id, event_type, occurred_at, resolved_at | 알람 이벤트 (resolved_at=NULL이면 미처리) |
+| `BOUNDARY_CONFIG` | description, x_min/max, y_min/max | 결제 구역 좌표 + 맵 외곽 경계 |
+| `ROBOT` | robot_id, ip_address, current_mode, pos_x/y, battery_level, last_seen, active_user_id, **is_locked_return** | 로봇 실시간 상태 |
+| `STAFF_CALL_LOG` | robot_id, user_id, event_type, occurred_at, resolved_at | 직원 호출 이벤트 (resolved_at=NULL이면 미처리) |
 | `EVENT_LOG` | robot_id, user_id, event_type, event_detail, occurred_at | 전체 운용 이벤트 타임라인 |
-| `SESSION` | session_id, robot_id, user_id, is_active, expires_at | 활성 세션 (유효: `is_active=1 AND expires_at > now()`) |
+| `SESSION` | session_id, robot_id, user_id, is_active, expires_at | 활성 세션 (유효: `is_active=1 AND expires_at > NOW()`) |
 | `CART` | cart_id, session_id | 세션당 1개 장바구니 |
-| `CART_ITEM` | item_id, cart_id, product_name, price, scanned_at | QR 스캔 담긴 상품 |
+| `CART_ITEM` | item_id, cart_id, product_name, price, scanned_at, **is_paid** | QR 스캔 상품. `is_paid=1`이면 결제 완료 |
 
-> **Pi 5 로컬 DB 없음.** 모든 테이블이 중앙 서버 DB에 통합.
+> **Pi 5 로컬 DB 없음.** 모든 테이블이 중앙 서버 MySQL DB에 통합.
 
-**ROBOT.current_mode 값:** `BATTERY_CHECK` / `CHARGING` / `IDLE` / `REGISTERING` / `TRACKING` / `SEARCHING` / `WAITING` / `ITEM_ADDING` / `GUIDING` / `CHECK_OUT` / `RETURNING` / `TOWARD_STANDBY_1~3` / `STANDBY_1~3` / `ALARM` / `OFFLINE`
+**ROBOT.current_mode 값:** `CHARGING` / `IDLE` / `TRACKING` / `TRACKING_CHECKOUT` / `GUIDING` / `SEARCHING` / `WAITING` / `LOCKED` / `RETURNING` / `HALTED` / `OFFLINE`
 
-**ALARM_LOG.event_type 값:** `THEFT` / `BATTERY_LOW` / `TIMEOUT` / `PAYMENT_ERROR`
+**STAFF_CALL_LOG.event_type 값:** `LOCKED` / `HALTED`
 
-**EVENT_LOG.event_type 값:** `SESSION_START` / `SESSION_END` / `FORCE_TERMINATE` / `ALARM_RAISED` / `ALARM_DISMISSED` / `PAYMENT_SUCCESS` / `PAYMENT_FAIL` / `MODE_CHANGE` / `OFFLINE` / `ONLINE` / `QUEUE_ADVANCE`
+**EVENT_LOG.event_type 값:** `SESSION_START` / `SESSION_END` / `FORCE_TERMINATE` / `LOCKED` / `HALTED` / `STAFF_RESOLVED` / `PAYMENT_SUCCESS` / `MODE_CHANGE` / `OFFLINE` / `ONLINE`
 
 ### 특수 구역 (ZONE 테이블 주요 ID)
 
 | zone_id | 구역명 | 용도 |
 |---|---|---|
-| 130 | 카트 입구 | 로봇 초기 진입 구역 |
-| 140 | STANDBY_1 (대기열 1번) | 사용자 카트 수령 위치 |
-| 141 | STANDBY_2 (대기열 2번) | 2번째 대기 위치 |
-| 142 | STANDBY_3 (대기열 3번) | 3번째 대기 위치 |
-| 150 | 결제 구역 | BoundaryMonitor CHECK_OUT 트리거 |
+| 110 | 입구 | 로봇 초기 진입 구역 |
+| 120 | 출구 | TRACKING 차단 기준 |
+| 130 | 카트 충전소 | 귀환 목적지 (RETURNING / LOCKED) |
+| 140 | 충전소 주차 슬롯 1 | 병렬 주차. 북쪽(theta=90°) 방향 |
+| 141 | 충전소 주차 슬롯 2 | 병렬 주차. 북쪽(theta=90°) 방향 |
+| 150 | 결제 구역 | BoundaryMonitor TRACKING_CHECKOUT 트리거 |
 
 ## Key Parameters (`config.py`)
 
@@ -276,22 +283,23 @@ ros_ws/
 | `IMAGE_WIDTH` | `640` | 카메라 해상도 (px) |
 | `KP_ANGLE` | `0.002` | P-Control 각속도 게인 |
 | `KP_DIST` | `0.0001` | P-Control 선속도 게인 (px² 단위) |
-| `BATTERY_THRESHOLD` | `20` | 배터리 알람 임계값 (%). 테스트 시 90으로 임시 상향 |
-| `ROBOT_TIMEOUT_SEC` | `30` | offline 판정 기준 (마지막 status 수신 후 초) |
-| `ALARM_DISMISS_PIN` | `"1234"` | 현장 알람 해제 4자리 PIN (데모용) |
+| `BATTERY_THRESHOLD` | `20` | 배터리 HALTED 임계값 (%). 테스트 시 90으로 임시 상향 |
+| `ROBOT_TIMEOUT_SEC` | `30` | OFFLINE 판정 기준 (마지막 status 수신 후 초) |
 | `SEARCH_TIMEOUT` | `30.0` | SEARCHING 상태 타임아웃 (초) |
 | `WAITING_TIMEOUT` | `300` | WAITING 상태 타임아웃 (초) |
 | `N_MISS_FRAMES` | `30` | 인형 소실 판정 연속 미감지 프레임 수 |
+| `MIN_DIST` | `0.25` | RPLiDAR 장애물 감지 최소 거리 (m) |
 | `LINEAR_X_MAX` | `0.3` | 최대 선속도 (m/s) |
 | `ANGULAR_Z_MAX` | `1.0` | 최대 각속도 (rad/s) |
 
 ## control_service 주요 구현 사항
 
-- **cleanup 스레드** (10s 주기): `last_seen < now - 30s` → `current_mode='OFFLINE'`, `active_user_id=NULL`
-- **QueueManager**: RETURNING 시 `/queue/assign` 호출 → zone 140/141/142 배정. 앞 위치 비워지면 `queue_advance` cmd 전송
+- **cleanup 스레드** (10s 주기): `last_seen < NOW() - 30s` → `current_mode='OFFLINE'`, `active_user_id=NULL`
+- **충전소 슬롯 배정** (`GET /zone/parking/available`): ROBOT 테이블에서 슬롯 140/141 주변 점유 로봇 확인 후 빈 슬롯 반환. 둘 다 점유 시 140 반환.
+- **카메라 MJPEG 스트림** (`GET /camera/<robot_id>`): 채널 H(UDP)로 수신한 Pi 카메라 프레임을 MJPEG로 re-stream. Admin UI 카메라 디버그 패널용.
 - **MySQL connection pool**: `pool_size=5`. 연결 설정은 환경 변수 `MYSQL_HOST/PORT/USER/PASSWORD/DATABASE`로 관리
-- **SQL 패턴**: 플레이스홀더 `%s`, 명시적 cursor, `cursor(dictionary=True)`로 dict row 반환. `UPDATE ... ORDER BY ... LIMIT 1` MySQL에서 직접 지원
-- **Keepout Filter**: RETURNING 시 `lifecycle_manager_filter` STARTUP으로 활성화, 완료/실패 시 PAUSE. BTGuiding에는 미적용
+- **SQL 패턴**: 플레이스홀더 `%s`, 명시적 cursor, `cursor(dictionary=True)`로 dict row 반환
+- **Keepout Filter**: RETURNING / LOCKED 귀환 시 `lifecycle_manager_filter` STARTUP으로 활성화, 완료/실패 시 PAUSE. BTGuiding에는 미적용
 
 ## Key Documentation
 
@@ -300,13 +308,12 @@ ros_ws/
 | `docs/user_requirements.md` | 사용자 요구사항 (UR) 테이블 |
 | `docs/system_requirements.md` | 시스템 요구사항 (SR) 테이블 |
 | `docs/system_architecture.md` | **Source of truth** — 전체 구성도, 컴포넌트 목록, 통신 채널 A~H |
-| `docs/interface_specification.md` | Python 인터페이스 명세 + 채널별 메시지 포맷 |
-| `docs/state_machine.md` | SM 18개 상태 정의, 전환 테이블 |
-| `docs/behavior_tree.md` | 5개 BT flowchart + SM↔BT 역할 분담 |
-| `docs/erd.md` | DB 스키마 (중앙 서버 DB 통합). Pi 로컬 DB 없음 |
-| `docs/map.md` | 미니어처 마트 맵 레이아웃, 구역 ID |
-| `docs/customer_ui.md` | Customer UI (customer_web) 화면 구성, 기능 목록, 유저 플로우 |
-| `docs/admin_ui.md` | Admin UI 화면 구성, 기능 목록, TCP 메시지 요약, 유저 플로우 |
-| `docs/scaffold_plan.md` | 패키지 뼈대 구현 계획 + 체크리스트 |
-| `docs/scenarios/index.md` | 시나리오 목록 (우선순위 순, 총 18개) |
+| `docs/interface_specification.md` | Python 인터페이스 명세 + 채널별 메시지 포맷 + REST API |
+| `docs/state_machine.md` | SM 10개 상태 정의, 전환 테이블, `is_locked_return` / `previous_tracking_state` 구현 노트 |
+| `docs/behavior_tree.md` | BT 1~5 flowchart + SM↔BT 역할 분담 |
+| `docs/erd.md` | DB 스키마 (MySQL DDL 포함). `STAFF_CALL_LOG`, `CART_ITEM.is_paid`, `ROBOT.is_locked_return` |
+| `docs/map.md` | 미니어처 마트 맵 레이아웃, 구역 ID, Keepout Filter 설명 |
+| `docs/customer_ui.md` | Customer UI 화면 구성, 기능 목록, 유저 플로우 |
+| `docs/admin_ui.md` | Admin UI 화면 구성, 기능 목록, TCP 메시지 요약, 유저 플로우. 카메라 디버그 패널(MJPEG + bbox 오버레이) 포함 |
+| `docs/scenarios/index.md` | 시나리오 목록 (SC-01~SC-82, 총 26개) — 상태 전환 단위 테스트 |
 | `cheatsheet.md` | SLAM and navigation command reference |

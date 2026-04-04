@@ -30,8 +30,9 @@ stateDiagram-v2
     TRACKING_CHECKOUT --> LOCKED : enter_locked\n(보내주기 + 물건 있음)
     TRACKING_CHECKOUT --> RETURNING : enter_returning\n(보내주기 + 물건 없음)
 
-    GUIDING --> TRACKING : enter_tracking\n(이전 상태가 TRACKING)
-    GUIDING --> TRACKING_CHECKOUT : enter_tracking_checkout\n(이전 상태가 TRACKING_CHECKOUT)
+    GUIDING --> WAITING : enter_waiting\n(목적지 도착)
+    GUIDING --> TRACKING : enter_tracking\n(Nav2 실패, 이전 상태 TRACKING)
+    GUIDING --> TRACKING_CHECKOUT : enter_tracking_checkout\n(Nav2 실패, 이전 상태 TRACKING_CHECKOUT)
 
     SEARCHING --> TRACKING : enter_tracking\n(재발견 + 이전 상태가 TRACKING)
     SEARCHING --> TRACKING_CHECKOUT : enter_tracking_checkout\n(재발견 + 이전 상태가 TRACKING_CHECKOUT)
@@ -57,19 +58,19 @@ stateDiagram-v2
 | 상태 | 설명 | 결제구역 통과 | 진입 조건 |
 |---|---|---|---|
 | `CHARGING` | 초기 상태. 충전기 연결 대기 또는 충전 중 | — | 로봇 전원 ON / 충전소 도착 |
-| `IDLE` | 사용자 등록 대기. 주인 인형 등록 기능 활성화. LCD에 QR 코드 표시 | — | 충전 완료 (`charging_completed`) |
+| `IDLE` | 사용자 등록 대기. 주인 인형 등록 기능 활성화. LCD에 QR 코드 + 안내 메시지 표시 | — | 충전 완료 (`charging_completed`) |
 | `TRACKING` | 주인 인형 팔로워. 장바구니 물건 관리. **결제구역 통과 불가** | ❌ | 주인 등록 완료 / 결제구역 재진입 쇼핑 재개 |
 | `TRACKING_CHECKOUT` | TRACKING과 동일한 기능. **결제 완료 후 결제구역 통과 허용** | ✅ | 결제 완료 (`enter_tracking_checkout`) |
 | `GUIDING` | 사용자 요청 목적지로 Nav2 이동 안내 | — | 고객 앱에서 가이드 선택 (`enter_guiding`) |
 | `SEARCHING` | 주인 놓침. 제자리 회전으로 재탐색 | — | 추종 중 주인 놓침 (`enter_searching`) |
-| `WAITING` | 탐색 실패 후 또는 사용자 요청으로 정지 대기. 사용자가 추종을 재개하거나 타임아웃 시 자동 전환 | — | 탐색 타임아웃 / 사용자 대기 요청 (`enter_waiting`) |
+| `WAITING` | 안내 도착·탐색 실패·사용자 요청으로 정지 대기. 사용자가 추종을 재개하거나 타임아웃 시 자동 전환 | — | 안내 도착 / 탐색 타임아웃 / 사용자 대기 요청 (`enter_waiting`) |
 | `LOCKED` | 보내주기 요청 + 미결제 물건 있음. 자동으로 충전 스테이션으로 귀환 시작. `is_locked_return = True` 플래그를 유지하며 RETURNING → CHARGING까지 LED 잠금 신호를 표시. 스태프 처리 완료 시 플래그 해제 | — | 보내주기 + 미결제 물건 존재 (`enter_locked`) |
 | `RETURNING` | Nav2로 충전 스테이션 복귀 중. `is_locked_return`이 True이면 LED 잠금 신호 유지 | — | 보내주기 + 장바구니 비어있음 / LOCKED 자동 귀환 |
 | `HALTED` | 배터리 부족으로 그 자리에서 즉시 정지. 자동 전환 없음. 스태프 수동 처리까지 유지 | — | 배터리 부족 (`enter_halted`) |
 
 > **TRACKING vs TRACKING_CHECKOUT 차이:**
 > - 결제 관련 동작을 제외하면 두 상태는 동일한 기능(팔로워, 장바구니 관리, 가이드, 탐색)을 수행한다.
-> - `TRACKING`: 결제구역 경계를 넘어 출구 방향으로 이동 불가. 결제구역 진입 시 앱 결제 팝업 + LCD 결제 QR 표시.
+> - `TRACKING`: 결제구역 경계를 넘어 출구 방향으로 이동 불가. 결제구역 진입 시 앱 결제 팝업 + LCD 결제 안내 메시지 표시.
 > - `TRACKING_CHECKOUT`: 결제 완료 상태. 출구 방향 이동 가능. 결제구역 안쪽으로 재진입 시 `TRACKING`으로 전환.
 
 > **WAITING vs HALTED 차이:**
@@ -115,7 +116,7 @@ stateDiagram-v2
 | `TRACKING` | `LOCKED` | `enter_locked` | "보내주기" 요청 + 미결제 물건 있음 |
 | `TRACKING` | `RETURNING` | `enter_returning` | "보내주기" 요청 + 장바구니 비어있음 |
 
-> 결제구역 **진입** 시 SM 상태 변경 없음 (TRACKING 유지). 앱에 결제 팝업 + LCD 결제 QR만 표시. 결제 완료 후 `enter_tracking_checkout` 전환.
+> 결제구역 **진입** 시 SM 상태 변경 없음 (TRACKING 유지). 앱에 결제 팝업 + LCD 결제 안내 메시지 표시. 결제 완료 후 `enter_tracking_checkout` 전환.
 
 ### TRACKING_CHECKOUT 전용 전환
 
@@ -125,12 +126,13 @@ stateDiagram-v2
 | `TRACKING_CHECKOUT` | `LOCKED` | `enter_locked` | "보내주기" 요청 + 미결제 물건 있음 |
 | `TRACKING_CHECKOUT` | `RETURNING` | `enter_returning` | "보내주기" 요청 + 장바구니 비어있음 |
 
-### GUIDING 복귀
+### GUIDING 전환
 
 | From | To | 트리거 | 조건 |
 |---|---|---|---|
-| `GUIDING` | `TRACKING` | `enter_tracking` | 가이드 완료 / 목적지 도착. 직전 상태가 TRACKING |
-| `GUIDING` | `TRACKING_CHECKOUT` | `enter_tracking_checkout` | 가이드 완료 / 목적지 도착. 직전 상태가 TRACKING_CHECKOUT |
+| `GUIDING` | `WAITING` | `enter_waiting` | Nav2 목적지 도착 성공 (BT4 SUCCESS). 앱에 `arrived` 이벤트 전송 |
+| `GUIDING` | `TRACKING` | `enter_tracking` | Nav2 실패 (`sm.resume_tracking()`). 직전 상태가 TRACKING |
+| `GUIDING` | `TRACKING_CHECKOUT` | `enter_tracking_checkout` | Nav2 실패 (`sm.resume_tracking()`). 직전 상태가 TRACKING_CHECKOUT |
 
 ### SEARCHING 전환
 
@@ -195,6 +197,7 @@ class ShoppinkiSM:
 
     def on_staff_resolved(self):
         self.is_locked_return = False  # 스태프 처리 완료 → 정상 충전 LED로 복귀
+        terminate_session()            # SESSION.is_active=0, ROBOT.active_user_id=NULL
 
     def get_led_color(self):
         if self.is_locked_return:
@@ -225,7 +228,7 @@ ShoppinkiStateMachine (transitions.Machine)
 |---|---|
 | 현재 상태 발행 | `on_enter_*` 콜백 → `/robot_<id>/status` 루프(1~2Hz) |
 | 앱 모드 전환 명령 수신 | `/robot_<id>/cmd` 구독 콜백 → JSON 파싱 후 `sm.trigger(...)` 호출 |
-| 결제구역 진입 감지 | BoundaryMonitor → 앱 결제 팝업 전송 + LCD 결제 QR 전환 (SM 상태 변경 없음) |
+| 결제구역 진입 감지 | BoundaryMonitor → 앱 결제 팝업 전송 + LCD 결제 안내 메시지 전환 (SM 상태 변경 없음) |
 | 결제구역 출구 차단 | BoundaryMonitor → `state == TRACKING`이면 이동 차단 |
 | 결제구역 재진입 감지 | BoundaryMonitor → `state == TRACKING_CHECKOUT`이면 `sm.trigger('enter_tracking')` |
 | 결제 완료 수신 | `/robot_<id>/cmd`: `{"cmd": "payment_success"}` → `sm.trigger('enter_tracking_checkout')` |
