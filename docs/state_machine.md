@@ -20,6 +20,9 @@ stateDiagram-v2
 
     TRACKING --> GUIDING : enter_guiding\n(가이드 선택)
     TRACKING --> SEARCHING : enter_searching\n(주인 놓침)
+    TRACKING --> WAITING : enter_waiting\n(사용자 요청)
+    TRACKING --> LOCKED : enter_locked\n(보내주기 + 물건 있음)
+    TRACKING --> RETURNING : enter_returning\n(보내주기 + 물건 없음)
     TRACKING --> TRACKING_CHECKOUT : enter_tracking_checkout\n(결제 완료)
     TRACKING_CHECKOUT --> GUIDING : enter_guiding\n(가이드 선택)
     TRACKING_CHECKOUT --> SEARCHING : enter_searching\n(주인 놓침)
@@ -59,7 +62,7 @@ stateDiagram-v2
 | `TRACKING_CHECKOUT` | TRACKING과 동일한 기능. **결제 완료 후 결제구역 통과 허용** | ✅ | 결제 완료 (`enter_tracking_checkout`) |
 | `GUIDING` | 사용자 요청 목적지로 Nav2 이동 안내 | — | 고객 앱에서 가이드 선택 (`enter_guiding`) |
 | `SEARCHING` | 주인 놓침. 제자리 회전으로 재탐색 | — | 추종 중 주인 놓침 (`enter_searching`) |
-| `WAITING` | 탐색 실패 후 정지 대기. 사용자가 추종을 재개하거나 타임아웃 시 자동 전환 | — | 탐색 타임아웃 (`enter_waiting`) |
+| `WAITING` | 탐색 실패 후 또는 사용자 요청으로 정지 대기. 사용자가 추종을 재개하거나 타임아웃 시 자동 전환 | — | 탐색 타임아웃 / 사용자 대기 요청 (`enter_waiting`) |
 | `LOCKED` | 보내주기 요청 + 미결제 물건 있음. 자동으로 충전 스테이션으로 귀환 시작. `is_locked_return = True` 플래그를 유지하며 RETURNING → CHARGING까지 LED 잠금 신호를 표시. 스태프 처리 완료 시 플래그 해제 | — | 보내주기 + 미결제 물건 존재 (`enter_locked`) |
 | `RETURNING` | Nav2로 충전 스테이션 복귀 중. `is_locked_return`이 True이면 LED 잠금 신호 유지 | — | 보내주기 + 장바구니 비어있음 / LOCKED 자동 귀환 |
 | `HALTED` | 배터리 부족으로 그 자리에서 즉시 정지. 자동 전환 없음. 스태프 수동 처리까지 유지 | — | 배터리 부족 (`enter_halted`) |
@@ -108,6 +111,9 @@ stateDiagram-v2
 | From | To | 트리거 | 조건 |
 |---|---|---|---|
 | `TRACKING` | `TRACKING_CHECKOUT` | `enter_tracking_checkout` | 결제구역에서 결제 완료 |
+| `TRACKING` | `WAITING` | `enter_waiting` | 사용자가 앱에서 [대기하기] 선택 |
+| `TRACKING` | `LOCKED` | `enter_locked` | "보내주기" 요청 + 미결제 물건 있음 |
+| `TRACKING` | `RETURNING` | `enter_returning` | "보내주기" 요청 + 장바구니 비어있음 |
 
 > 결제구역 **진입** 시 SM 상태 변경 없음 (TRACKING 유지). 앱에 결제 팝업 + LCD 결제 QR만 표시. 결제 완료 후 `enter_tracking_checkout` 전환.
 
