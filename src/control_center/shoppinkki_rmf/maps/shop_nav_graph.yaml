@@ -1,190 +1,129 @@
-# ShopPinkki RMF Nav Graph — 실측 좌표 기반
-# 좌표 기준: shop.yaml (origin=[-0.183,-1.773], resolution=0.01, 149x195px)
+# ShopPinkki RMF Nav Graph — from_config_files() 호환 포맷
+# building_map_generator 출력과 동일한 구조
 #
-# 버텍스 인덱스:
+# 버텍스: [x, y, {name, params...}]
+# 레인:   [from_idx, to_idx, {is_bidirectional, ...}]
+#
+# 인덱스:
 #  0=입구1  1=입구2  2=P1  3=P2  4=출구2  5=출구1
 #  6=가전제품1  7=가전제품2  8=과자1  9=과자_해산물
 #  10=해산물2  11=육류1  12=육류2  13=채소1  14=채소_화장실
 #  15=화장실2  16=결제구역1  17=결제구역2
 #  18=빵1  19=빵2  20=가공식품1  21=가공식품2  22=음료1  23=음료2
 
+building_name: "ShopPinkki Miniature Mart"
 levels:
-  - name: "L1"
+  L1:
     vertices:
-      # 왼쪽 복도 (입구·충전소·출구)
-      - x: -0.009
-        y: -0.031
-        name: "입구1"
-        params: {}
-      - x: -0.003
-        y: -0.332
-        name: "입구2"
-        params: {}
-      - x: 0.002
-        y: -0.518
-        name: "P1"
-        params:
-          is_parking_spot: {type: bool, value: true}
-          is_charger: {type: bool, value: true}
-      - x: 0.002
-        y: -0.789
-        name: "P2"
-        params:
-          is_parking_spot: {type: bool, value: true}
-          is_charger: {type: bool, value: true}
-      - x: -0.032
-        y: -1.402
-        name: "출구2"
-        params: {}
-      - x: -0.056
-        y: -1.617
-        name: "출구1"
-        params: {}
+      - [-0.009, -0.031, {name: "입구1"}]
+      - [-0.003, -0.332, {name: "입구2"}]
+      - [ 0.002, -0.518, {name: "P1",          is_parking_spot: true, is_charger: true}]
+      - [ 0.002, -0.789, {name: "P2",          is_parking_spot: true, is_charger: true}]
+      - [-0.032, -1.402, {name: "출구2"}]
+      - [-0.056, -1.617, {name: "출구1"}]
+      - [ 0.489, -0.007, {name: "가전제품1",   pickup_zone: true}]
+      - [ 0.749, -0.006, {name: "가전제품2",   pickup_zone: true}]
+      - [ 0.916, -0.004, {name: "과자1",       pickup_zone: true}]
+      - [ 1.142, -0.003, {name: "과자_해산물"}]
+      - [ 1.145, -0.304, {name: "해산물2",     pickup_zone: true}]
+      - [ 1.156, -0.608, {name: "육류1",       pickup_zone: true}]
+      - [ 1.151, -0.899, {name: "육류2",       pickup_zone: true}]
+      - [ 1.154, -1.224, {name: "채소1",       pickup_zone: true}]
+      - [ 1.149, -1.573, {name: "채소_화장실"}]
+      - [ 0.812, -1.606, {name: "화장실2",     pickup_zone: true}]
+      - [ 0.186, -1.614, {name: "결제구역1",   is_holding_point: true}]
+      - [ 0.183, -1.364, {name: "결제구역2",   is_holding_point: true}]
+      - [ 0.494, -0.300, {name: "빵1",         pickup_zone: true}]
+      - [ 0.776, -0.275, {name: "빵2",         pickup_zone: true}]
+      - [ 0.774, -0.606, {name: "가공식품1",   pickup_zone: true}]
+      - [ 0.473, -0.601, {name: "가공식품2",   pickup_zone: true}]
+      - [ 0.704, -0.928, {name: "음료1",       pickup_zone: true}]
+      - [ 0.715, -1.197, {name: "음료2",       pickup_zone: true}]
 
-      # 위쪽 복도 (가전·과자)
-      - x: 0.489
-        y: -0.007
-        name: "가전제품1"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 0.749
-        y: -0.006
-        name: "가전제품2"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 0.916
-        y: -0.004
-        name: "과자1"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 1.142
-        y: -0.003
-        name: "과자_해산물"
-        params: {}
-
-      # 오른쪽 복도 (해산물·육류·채소)
-      - x: 1.145
-        y: -0.304
-        name: "해산물2"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 1.156
-        y: -0.608
-        name: "육류1"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 1.151
-        y: -0.899
-        name: "육류2"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 1.154
-        y: -1.224
-        name: "채소1"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 1.149
-        y: -1.573
-        name: "채소_화장실"
-        params: {}
-
-      # 아래쪽 복도 (화장실·결제·출구)
-      - x: 0.812
-        y: -1.606
-        name: "화장실2"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 0.186
-        y: -1.614
-        name: "결제구역1"
-        params:
-          is_holding_point: {type: bool, value: true}
-      - x: 0.183
-        y: -1.364
-        name: "결제구역2"
-        params:
-          is_holding_point: {type: bool, value: true}
-
-      # 내부 통로 (빵·가공식품·음료)
-      - x: 0.494
-        y: -0.300
-        name: "빵1"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 0.776
-        y: -0.275
-        name: "빵2"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 0.774
-        y: -0.606
-        name: "가공식품1"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 0.473
-        y: -0.601
-        name: "가공식품2"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 0.704
-        y: -0.928
-        name: "음료1"
-        params:
-          pickup_zone: {type: bool, value: true}
-      - x: 0.715
-        y: -1.197
-        name: "음료2"
-        params:
-          pickup_zone: {type: bool, value: true}
-
-    edges:
+    lanes:
       # 외곽 루프 — 왼쪽 복도
-      - {v1_idx: 0,  v2_idx: 1,  bidirectional: true, edge_rgb: {r: 0.2, g: 0.8, b: 0.2}}
-      - {v1_idx: 1,  v2_idx: 2,  bidirectional: true, edge_rgb: {r: 0.2, g: 0.8, b: 0.2}}
-      - {v1_idx: 2,  v2_idx: 3,  bidirectional: true, edge_rgb: {r: 0.2, g: 0.8, b: 0.2}}
-      - {v1_idx: 3,  v2_idx: 4,  bidirectional: true, edge_rgb: {r: 0.2, g: 0.8, b: 0.2}}
-      - {v1_idx: 4,  v2_idx: 5,  bidirectional: true, edge_rgb: {r: 0.2, g: 0.8, b: 0.2}}
+      - [0,  1,  {is_bidirectional: false}]
+      - [1,  0,  {is_bidirectional: false}]
+      - [1,  2,  {is_bidirectional: false}]
+      - [2,  1,  {is_bidirectional: false}]
+      - [2,  3,  {is_bidirectional: false}]
+      - [3,  2,  {is_bidirectional: false}]
+      - [3,  4,  {is_bidirectional: false}]
+      - [4,  3,  {is_bidirectional: false}]
+      - [4,  5,  {is_bidirectional: false}]
+      - [5,  4,  {is_bidirectional: false}]
       # 외곽 루프 — 위쪽 복도
-      - {v1_idx: 0,  v2_idx: 6,  bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
-      - {v1_idx: 6,  v2_idx: 7,  bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
-      - {v1_idx: 7,  v2_idx: 8,  bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
-      - {v1_idx: 8,  v2_idx: 9,  bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
+      - [0,  6,  {is_bidirectional: false}]
+      - [6,  0,  {is_bidirectional: false}]
+      - [6,  7,  {is_bidirectional: false}]
+      - [7,  6,  {is_bidirectional: false}]
+      - [7,  8,  {is_bidirectional: false}]
+      - [8,  7,  {is_bidirectional: false}]
+      - [8,  9,  {is_bidirectional: false}]
+      - [9,  8,  {is_bidirectional: false}]
       # 외곽 루프 — 오른쪽 복도
-      - {v1_idx: 9,  v2_idx: 10, bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
-      - {v1_idx: 10, v2_idx: 11, bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
-      - {v1_idx: 11, v2_idx: 12, bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
-      - {v1_idx: 12, v2_idx: 13, bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
-      - {v1_idx: 13, v2_idx: 14, bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
+      - [9,  10, {is_bidirectional: false}]
+      - [10, 9,  {is_bidirectional: false}]
+      - [10, 11, {is_bidirectional: false}]
+      - [11, 10, {is_bidirectional: false}]
+      - [11, 12, {is_bidirectional: false}]
+      - [12, 11, {is_bidirectional: false}]
+      - [12, 13, {is_bidirectional: false}]
+      - [13, 12, {is_bidirectional: false}]
+      - [13, 14, {is_bidirectional: false}]
+      - [14, 13, {is_bidirectional: false}]
       # 외곽 루프 — 아래쪽 복도
-      - {v1_idx: 14, v2_idx: 15, bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
-      - {v1_idx: 15, v2_idx: 16, bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
-      - {v1_idx: 16, v2_idx: 5,  bidirectional: true, edge_rgb: {r: 0.2, g: 0.2, b: 0.8}}
+      - [14, 15, {is_bidirectional: false}]
+      - [15, 14, {is_bidirectional: false}]
+      - [15, 16, {is_bidirectional: false}]
+      - [16, 15, {is_bidirectional: false}]
+      - [16, 5,  {is_bidirectional: false}]
+      - [5,  16, {is_bidirectional: false}]
       # 내부 수평 통로 — y≈-0.3
-      - {v1_idx: 1,  v2_idx: 18, bidirectional: true, edge_rgb: {r: 0.8, g: 0.4, b: 0.0}}
-      - {v1_idx: 18, v2_idx: 19, bidirectional: true, edge_rgb: {r: 0.8, g: 0.4, b: 0.0}}
-      - {v1_idx: 19, v2_idx: 10, bidirectional: true, edge_rgb: {r: 0.8, g: 0.4, b: 0.0}}
+      - [1,  18, {is_bidirectional: false}]
+      - [18, 1,  {is_bidirectional: false}]
+      - [18, 19, {is_bidirectional: false}]
+      - [19, 18, {is_bidirectional: false}]
+      - [19, 10, {is_bidirectional: false}]
+      - [10, 19, {is_bidirectional: false}]
       # 내부 수평 통로 — y≈-0.6
-      - {v1_idx: 2,  v2_idx: 21, bidirectional: true, edge_rgb: {r: 0.8, g: 0.4, b: 0.0}}
-      - {v1_idx: 21, v2_idx: 20, bidirectional: true, edge_rgb: {r: 0.8, g: 0.4, b: 0.0}}
-      - {v1_idx: 20, v2_idx: 11, bidirectional: true, edge_rgb: {r: 0.8, g: 0.4, b: 0.0}}
+      - [2,  21, {is_bidirectional: false}]
+      - [21, 2,  {is_bidirectional: false}]
+      - [21, 20, {is_bidirectional: false}]
+      - [20, 21, {is_bidirectional: false}]
+      - [20, 11, {is_bidirectional: false}]
+      - [11, 20, {is_bidirectional: false}]
       # 내부 수평 통로 — y≈-0.9
-      - {v1_idx: 3,  v2_idx: 22, bidirectional: true, edge_rgb: {r: 0.8, g: 0.4, b: 0.0}}
-      - {v1_idx: 22, v2_idx: 12, bidirectional: true, edge_rgb: {r: 0.8, g: 0.4, b: 0.0}}
+      - [3,  22, {is_bidirectional: false}]
+      - [22, 3,  {is_bidirectional: false}]
+      - [22, 12, {is_bidirectional: false}]
+      - [12, 22, {is_bidirectional: false}]
       # 내부 수평 통로 — y≈-1.2
-      - {v1_idx: 23, v2_idx: 13, bidirectional: true, edge_rgb: {r: 0.8, g: 0.4, b: 0.0}}
+      - [23, 13, {is_bidirectional: false}]
+      - [13, 23, {is_bidirectional: false}]
       # 내부 수평 통로 — y≈-1.4
-      - {v1_idx: 4,  v2_idx: 17, bidirectional: true, edge_rgb: {r: 0.8, g: 0.4, b: 0.0}}
+      - [4,  17, {is_bidirectional: false}]
+      - [17, 4,  {is_bidirectional: false}]
       # 내부 수직 통로 — x≈0.49
-      - {v1_idx: 6,  v2_idx: 18, bidirectional: true, edge_rgb: {r: 0.6, g: 0.6, b: 0.0}}
-      - {v1_idx: 18, v2_idx: 21, bidirectional: true, edge_rgb: {r: 0.6, g: 0.6, b: 0.0}}
+      - [6,  18, {is_bidirectional: false}]
+      - [18, 6,  {is_bidirectional: false}]
+      - [18, 21, {is_bidirectional: false}]
+      - [21, 18, {is_bidirectional: false}]
       # 내부 수직 통로 — x≈0.77
-      - {v1_idx: 7,  v2_idx: 19, bidirectional: true, edge_rgb: {r: 0.6, g: 0.6, b: 0.0}}
-      - {v1_idx: 19, v2_idx: 20, bidirectional: true, edge_rgb: {r: 0.6, g: 0.6, b: 0.0}}
-      - {v1_idx: 20, v2_idx: 22, bidirectional: true, edge_rgb: {r: 0.6, g: 0.6, b: 0.0}}
-      - {v1_idx: 22, v2_idx: 23, bidirectional: true, edge_rgb: {r: 0.6, g: 0.6, b: 0.0}}
+      - [7,  19, {is_bidirectional: false}]
+      - [19, 7,  {is_bidirectional: false}]
+      - [19, 20, {is_bidirectional: false}]
+      - [20, 19, {is_bidirectional: false}]
+      - [20, 22, {is_bidirectional: false}]
+      - [22, 20, {is_bidirectional: false}]
+      - [22, 23, {is_bidirectional: false}]
+      - [23, 22, {is_bidirectional: false}]
       # 음료2 → 화장실2
-      - {v1_idx: 23, v2_idx: 15, bidirectional: true, edge_rgb: {r: 0.6, g: 0.6, b: 0.0}}
+      - [23, 15, {is_bidirectional: false}]
+      - [15, 23, {is_bidirectional: false}]
       # 결제구역 수직 연결
-      - {v1_idx: 16, v2_idx: 17, bidirectional: true, edge_rgb: {r: 0.8, g: 0.0, b: 0.8}}
+      - [16, 17, {is_bidirectional: false}]
+      - [17, 16, {is_bidirectional: false}]
 
-lifts: []
+lifts: {}
+doors: {}

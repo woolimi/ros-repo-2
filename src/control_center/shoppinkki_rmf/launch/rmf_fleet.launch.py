@@ -34,26 +34,10 @@ def generate_launch_description() -> LaunchDescription:
         description='fleet_config.yaml 경로',
     )
 
-    # ── rmf_traffic_schedule_node ─────────────────────────────────────────────
-    # RMF 교통 스케줄러: 각 로봇의 경로를 받아 충돌 협상 수행
-    traffic_schedule = Node(
-        package='rmf_traffic_ros2',
-        executable='rmf_traffic_schedule_node',
-        name='rmf_traffic_schedule',
-        output='screen',
-        parameters=[{'use_sim_time': False}],
-    )
-
-    # ── rmf_traffic_blockade_node ─────────────────────────────────────────────
-    traffic_blockade = Node(
-        package='rmf_traffic_ros2',
-        executable='rmf_traffic_blockade_node',
-        name='rmf_traffic_blockade',
-        output='screen',
-        parameters=[{'use_sim_time': False}],
-    )
-
     # ── PinkyFleetAdapter ─────────────────────────────────────────────────────
+    # 주의: rmf_traffic_schedule / rmf_traffic_blockade 는 별도 터미널에서 실행
+    #   ros2 run rmf_traffic_ros2 rmf_traffic_schedule
+    #   ros2 run rmf_traffic_ros2 rmf_traffic_blockade
     fleet_adapter = Node(
         package='shoppinkki_rmf',
         executable='fleet_adapter',
@@ -67,7 +51,5 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription([
         config_file_arg,
-        traffic_schedule,
-        traffic_blockade,
         fleet_adapter,
     ])

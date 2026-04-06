@@ -1,15 +1,15 @@
 """ShopPinkki Open-RMF Fleet Adapter.
 
-rmf_adapter Python API (Jazzy) 기반.
+rmf_adapter Python API (Jazzy / rmf_fleet_adapter 2.7.2) 기반.
 두 Pinky 로봇(#54, #18)을 RMF EasyFullControl에 등록하고
 경로 충돌을 자동 조정.
 
 실행:
-    ros2 run shoppinkki_rmf fleet_adapter \\
-        --ros-args -p config_file:=<path>/fleet_config.yaml
+    ros2 launch shoppinkki_rmf rmf_fleet.launch.py
 
 의존:
     sudo apt install ros-jazzy-rmf-fleet-adapter ros-jazzy-rmf-fleet-adapter-python
+    numpy < 2.0 필수 (pip install "numpy<2.0")
 """
 
 from __future__ import annotations
@@ -22,56 +22,15 @@ import threading
 import time
 from typing import Dict, Optional
 
-import numpy as np
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
 import rmf_adapter as adpt
 import rmf_adapter.easy_full_control as efc
-import rmf_adapter.graph as rmf_graph
-import rmf_adapter.vehicletraits as traits
-import rmf_adapter.geometry as geometry
-import rmf_adapter.battery as battery
 import requests
 
 logger = logging.getLogger(__name__)
-
-
-# ── Nav Graph 빌드 ─────────────────────────────────────────────────────────────
-
-def _build_nav_graph(nav_data: dict) -> rmf_graph.Graph:
-    """shop_nav_graph.yaml dict → rmf_adapter.graph.Graph 변환."""
-    g = rmf_graph.Graph()
-    levels = nav_data.get('levels', [])
-    if not levels:
-        raise ValueError('nav_graph에 level이 없습니다')
-
-    level = levels[0]
-    map_name = level['name']
-
-    for v in level.get('vertices', []):
-        wp = g.add_waypoint(map_name, [v['x'], v['y']])
-        params = v.get('params', {})
-        if params.get('is_charger', {}).get('value'):
-            wp.set_charger(True)
-        if params.get('is_parking_spot', {}).get('value') or \
-           params.get('is_holding_point', {}).get('value'):
-            wp.set_holding_point(True)
-        name = v.get('name', '')
-        if name:
-            g.add_key(name, wp.index)
-
-    for edge in level.get('edges', []):
-        v1, v2 = edge['v1_idx'], edge['v2_idx']
-        if edge.get('bidirectional', True):
-            g.add_bidir_lane(v1, v2)
-        else:
-            g.add_lane(v1, v2)
-
-    logger.info('Nav graph 로드: %d 웨이포인트, %d 레인',
-                g.num_waypoints, g.num_lanes)
-    return g
 
 
 # ── 단일 로봇 어댑터 ────────────────────────────────────────────────────────────
@@ -92,7 +51,7 @@ class RobotAdapter:
         self._battery = 1.0
         self._mode = 'CHARGING'
 
-        self._handle: Optional[adpt.easy_full_control.EasyRobotUpdateHandle] = None
+        self._handle: Optional[efc.EasyRobotUpdateHandle] = None
         self._handle_lock = threading.Lock()
 
         self._nav_cancel = threading.Event()
@@ -111,6 +70,7 @@ class RobotAdapter:
 
         with self._handle_lock:
             if self._handle is not None:
+                import numpy as np
                 state = efc.RobotState(
                     map='L1',
                     position=np.array([self._x, self._y, self._yaw]),
@@ -220,18 +180,19 @@ class RobotAdapter:
 class PinkyFleetAdapter(Node):
     """두 Pinky 로봇을 RMF에 등록하는 메인 노드."""
 
-    def __init__(self, config: dict, nav_graph: rmf_graph.Graph) -> None:
+    def __init__(self, config: dict, config_file: str, nav_graph_path: str) -> None:
         super().__init__('pinky_fleet_adapter')
 
-        fleet_cfg = config.get('fleet', {})
+        fleet_cfg = config.get('rmf_fleet', {})
         ctrl_cfg = config.get('control_service', {})
         ctrl_host = ctrl_cfg.get('host', '127.0.0.1')
         ctrl_port = int(ctrl_cfg.get('http_port', 8081))
 
         # 로봇 어댑터 + status 구독
         self._robots: Dict[str, RobotAdapter] = {}
-        for r in fleet_cfg.get('robots', []):
-            rid = str(r['id'])
+        for robot_name, robot_cfg in fleet_cfg.get('robots', {}).items():
+            # robot_name 포맷: "pinky_54" → id = "54"
+            rid = robot_name.replace('pinky_', '')
             robot = RobotAdapter(rid, ctrl_host, ctrl_port)
             self._robots[rid] = robot
             self.create_subscription(
@@ -240,127 +201,83 @@ class PinkyFleetAdapter(Node):
                 10,
             )
 
-        # RMF Adapter 초기화
-        self._easy_fleet = self._init_rmf(fleet_cfg, nav_graph)
-
-        # 로봇 등록
-        if self._easy_fleet is not None:
-            for r in fleet_cfg.get('robots', []):
-                self._register_robot(str(r['id']), r, nav_graph)
+        # RMF Adapter + EasyFleet 초기화
+        self._adapter = None
+        self._easy_fleet = None
+        self._init_rmf(fleet_cfg, config_file, nav_graph_path)
 
         self.get_logger().info(
-            'PinkyFleetAdapter 준비: %s', list(self._robots.keys())
+            f'PinkyFleetAdapter 준비: {list(self._robots.keys())}'
         )
 
     # ── RMF 초기화 ─────────────────────────────────────────────────────────────
 
-    def _init_rmf(self, fleet_cfg: dict, nav_graph: rmf_graph.Graph):
+    def _init_rmf(self, fleet_cfg: dict, config_file: str, nav_graph_path: str) -> None:
         try:
             fleet_name = fleet_cfg.get('name', 'pinky_fleet')
-            limits_cfg = fleet_cfg.get('limits', {})
-            profile_cfg = fleet_cfg.get('profile', {})
-            lin = limits_cfg.get('linear', {})
-            ang = limits_cfg.get('angular', {})
 
-            vehicle_traits = traits.VehicleTraits(
-                linear=traits.Limits(
-                    lin.get('velocity', 0.3),
-                    lin.get('acceleration', 0.5),
-                ),
-                angular=traits.Limits(
-                    ang.get('velocity', 1.0),
-                    ang.get('acceleration', 1.5),
-                ),
-                profile=traits.Profile(
-                    geometry.SimpleCircle(profile_cfg.get('footprint', 0.06))
-                ),
+            # FleetConfiguration — from_config_files 방식 (NumPy 호환)
+            fleet_config = efc.FleetConfiguration.from_config_files(
+                config_file, nav_graph_path
             )
+            if fleet_config is None:
+                self.get_logger().error('FleetConfiguration 로드 실패')
+                return
 
-            bat = battery.BatterySystem.make(10.0, 10.0, 5.0)
-            mech = battery.MechanicalSystem.make(12.0, 0.5, 0.5)
-            motion_sink = battery.SimpleMotionPowerSink(bat, mech)
-            ambient_sink = battery.SimpleDevicePowerSink(
-                bat, battery.PowerSystem.make(20.0))
-            tool_sink = battery.SimpleDevicePowerSink(
-                bat, battery.PowerSystem.make(10.0))
+            # Adapter 생성 (rmf_traffic_schedule 필요)
+            self._adapter = adpt.Adapter.make(fleet_name)
+            if self._adapter is None:
+                self.get_logger().error(
+                    'Adapter.make 실패 — rmf_traffic_schedule 실행 여부 확인')
+                return
 
-            known_configs = {
-                f'pinky_{r["id"]}': efc.RobotConfiguration(
-                    compatible_chargers=[r.get('initial_waypoint', 'P1')]
-                )
-                for r in fleet_cfg.get('robots', [])
-            }
+            self._easy_fleet = self._adapter.add_easy_fleet(fleet_config)
+            self._adapter.start()
+            self.get_logger().info(f'RMF Adapter 시작: {fleet_name}')
 
-            fleet_config = efc.FleetConfiguration(
-                fleet_name=fleet_name,
-                transformations_to_robot_coordinates=None,
-                known_robot_configurations=known_configs,
-                traits=vehicle_traits,
-                graph=nav_graph,
-                battery_system=bat,
-                motion_sink=motion_sink,
-                ambient_sink=ambient_sink,
-                tool_sink=tool_sink,
-                recharge_threshold=0.05,
-                recharge_soc=1.0,
-                account_for_battery_drain=False,
-                task_categories={},
-                action_categories={},
-                finishing_request='charge',
-                skip_rotation_commands=True,
-                server_uri=None,
-            )
-
-            adpt.init_rclcpp()
-            adapter = adpt.Adapter.make(fleet_name)
-            if adapter is None:
-                self.get_logger().error('adpt.Adapter.make 실패')
-                return None
-
-            easy_fleet = adapter.add_easy_fleet(fleet_config)
-            adapter.start()
-            self.get_logger().info('RMF Adapter 시작: %s', fleet_name)
-            return easy_fleet
+            # 로봇 등록
+            for rid, robot in self._robots.items():
+                robot_name = f'pinky_{rid}'
+                charger = fleet_cfg.get('robots', {}).get(
+                    robot_name, {}).get('charger', 'P1')
+                yaw = float(fleet_cfg.get('robots', {}).get(
+                    robot_name, {}).get('initial_orientation', 0.0))
+                self._register_robot(rid, robot_name, charger, yaw)
 
         except Exception as e:
-            self.get_logger().error('RMF 초기화 실패: %s', e, exc_info=True)
-            return None
+            self.get_logger().error(f'RMF 초기화 실패: {e}')
 
     # ── 로봇 등록 ───────────────────────────────────────────────────────────────
 
     def _register_robot(
-        self, robot_id: str, robot_cfg: dict, nav_graph: rmf_graph.Graph
+        self, robot_id: str, robot_name: str, charger: str, initial_yaw: float
     ) -> None:
+        import numpy as np
         robot = self._robots[robot_id]
-        wp_name = robot_cfg.get('initial_waypoint', 'P1')
+        graph = self._easy_fleet  # fleet에서 그래프 참조 불가 → charger 위치는 0,0으로 시작
 
-        wp = nav_graph.find_waypoint(wp_name)
-        if wp is None:
-            self.get_logger().error('웨이포인트 없음: %s', wp_name)
-            return
+        # 초기 위치: 충전소 이름으로 waypoint 위치 가져오기
+        nav_graph = None
+        try:
+            nav_graph = self._adapter  # adapter에서 graph 접근 불가
+        except Exception:
+            pass
 
-        loc = wp.location
-        yaw = float(robot_cfg.get('initial_orientation', 0.0))
-
+        # 초기 상태는 (0,0)에서 시작, 첫 status 수신 시 업데이트됨
         state = efc.RobotState(
             map='L1',
-            position=np.array([loc[0], loc[1], yaw]),
+            position=np.array([0.0, 0.0, initial_yaw]),
             battery_soc=1.0,
         )
-        robot_config = efc.RobotConfiguration(
-            compatible_chargers=[wp_name]
-        )
+        robot_config = efc.RobotConfiguration(compatible_chargers=[charger])
         callbacks = robot.make_callbacks()
 
         handle = self._easy_fleet.add_robot(
-            f'pinky_{robot_id}', state, robot_config, callbacks
+            robot_name, state, robot_config, callbacks
         )
         robot.set_handle(handle)
 
-        self.get_logger().info(
-            '로봇 등록: pinky_%s @ %s (%.3f, %.3f)',
-            robot_id, wp_name, loc[0], loc[1],
-        )
+        self.get_logger().info(f'로봇 등록: {robot_name} (charger={charger})')
 
     # ── ROS 콜백 ────────────────────────────────────────────────────────────────
 
@@ -369,7 +286,7 @@ class PinkyFleetAdapter(Node):
             data = json.loads(msg.data)
             self._robots[robot_id].on_status(data)
         except Exception as e:
-            self.get_logger().warning('status 파싱 오류: %s', e)
+            self.get_logger().warning(f'status 파싱 오류: {e}')
 
 
 # ── 진입점 ─────────────────────────────────────────────────────────────────────
@@ -380,6 +297,8 @@ def main(args=None) -> None:
         format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     )
 
+    # rclcpp를 먼저 초기화해야 adpt.Adapter.make()가 동작함
+    adpt.init_rclcpp()
     rclpy.init(args=args)
 
     # config_file 파라미터
@@ -406,25 +325,15 @@ def main(args=None) -> None:
         rclpy.shutdown()
         return
 
-    # nav graph 로드
-    graph_rel = config.get('fleet', {}).get('nav_graph', 'shop_nav_graph.yaml')
+    # nav graph 경로
     try:
         from ament_index_python.packages import get_package_share_directory
         pkg = get_package_share_directory('shoppinkki_rmf')
     except Exception:
         pkg = os.path.join(os.path.dirname(__file__), '..', '..')
-    graph_path = os.path.join(pkg, 'maps', graph_rel)
+    nav_graph_path = os.path.join(pkg, 'maps', 'shop_nav_graph.yaml')
 
-    try:
-        with open(graph_path) as f:
-            nav_data = yaml.safe_load(f)
-        nav_graph = _build_nav_graph(nav_data)
-    except Exception as e:
-        logger.error('nav graph 로드 실패: %s', e)
-        rclpy.shutdown()
-        return
-
-    node = PinkyFleetAdapter(config, nav_graph)
+    node = PinkyFleetAdapter(config, config_file, nav_graph_path)
 
     try:
         rclpy.spin(node)

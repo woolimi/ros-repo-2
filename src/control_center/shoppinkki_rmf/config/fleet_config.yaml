@@ -1,44 +1,53 @@
 # ShopPinkki Open-RMF Fleet 설정
+# from_config_files() 호환 포맷 (rmf_fleet_adapter 2.7.2)
 #
-# 참고: 이 파일은 fleet_adapter.py에서 로드됩니다.
-# traffic_editor로 생성한 nav graph는 maps/shop_nav_graph.yaml 참조.
+# 참고:
+#   fleet_adapter.py 에서 FleetConfiguration.from_config_files()로 로드
+#   nav graph 파일: maps/shop_nav_graph.yaml
 
-fleet:
+rmf_fleet:
   name: "pinky_fleet"
 
-  # 로봇 목록
-  robots:
-    - id: "54"
-      ip: "192.168.102.54"
-      initial_waypoint: "P1"       # 충전소 슬롯 1
-      initial_orientation: 0.0
-
-    - id: "18"
-      ip: "192.168.102.18"
-      initial_waypoint: "P2"       # 충전소 슬롯 2
-      initial_orientation: 0.0
-
-  # 로봇 물리 프로파일 (Pinky Pro 기준)
   profile:
-    footprint: 0.060      # 반지름 (m) — Pinky 110mm 폭의 절반
-    vicinity: 0.20        # 충돌 판정 반경 (m)
+    footprint: 0.060     # 로봇 반지름 (m)
+    vicinity: 0.200      # 충돌 판정 반경 (m)
 
-  # 속도/가속도 한계
   limits:
-    linear:
-      velocity: 0.30      # m/s (config.py LINEAR_X_MAX)
-      acceleration: 0.50  # m/s²
-    angular:
-      velocity: 1.00      # rad/s (config.py ANGULAR_Z_MAX)
-      acceleration: 1.50  # rad/s²
+    linear:  [0.30, 0.50]   # [velocity(m/s), acceleration(m/s²)]
+    angular: [1.00, 1.50]   # [velocity(rad/s), acceleration(rad/s²)]
 
-  # Nav graph 파일 (maps/ 디렉터리 기준)
-  nav_graph: "shop_nav_graph.yaml"
+  battery_system:
+    voltage:          10.0   # V
+    capacity:         10.0   # Ah
+    charging_current:  5.0   # A
 
-# Control Service 연결 (RMF → control_service REST API)
+  mechanical_system:
+    mass:                 12.0   # kg
+    moment_of_inertia:     0.5   # kg·m²
+    friction_coefficient:  0.5
+
+  ambient_system:
+    power: 20.0   # W
+
+  tool_system:
+    power: 10.0   # W
+
+  recharge_threshold: 0.05
+  recharge_soc:       1.0
+  account_for_battery_drain: false
+  finishing_request: "charge"
+  skip_rotation_commands: true
+
+  # 로봇 목록 (charger = initial_waypoint 이름)
+  robots:
+    pinky_54:
+      charger: "P1"
+      initial_orientation: 0.0
+    pinky_18:
+      charger: "P2"
+      initial_orientation: 0.0
+
+# Control Service 연결 (fleet_adapter → control_service REST API)
 control_service:
   host: "127.0.0.1"
-  http_port: 8081          # REST API 포트
-
-# 로봇 상태 업데이트 주기
-update_rate_hz: 2.0
+  http_port: 8081
