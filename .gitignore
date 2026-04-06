@@ -10,3 +10,4 @@ log.css
 log/
 .env
 
+.rmf_schedule_node.yaml
