@@ -71,7 +71,7 @@ def register_handlers(socketio, control_clients: dict, llm_cfg: dict):
     def on_return(data=None):
         robot_id, cc = _get_client()
         if cc:
-            cc.send({"cmd": "return", "robot_id": robot_id})
+            cc.send({"cmd": "mode", "robot_id": robot_id, "value": "RETURNING"})
 
     # ── 상품 안내 ──────────────────────────────────────────────
 

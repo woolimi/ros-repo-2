@@ -107,6 +107,15 @@ def create_app(robot_manager: 'RobotManager',
         if not user:
             return jsonify({'error': 'user not found'}), 404
 
+        # Check robot availability by mode
+        robot = db.get_robot(robot_id)
+        if robot:
+            mode = robot.get('current_mode')
+            if mode == 'CHARGING':
+                return jsonify({'error': 'robot is charging'}), 409
+            if mode in ('RETURNING', 'LOCKED'):
+                return jsonify({'error': 'robot is returning'}), 409
+
         # Check for existing active session on same robot
         existing = db.get_active_session_by_robot(robot_id)
         if existing:

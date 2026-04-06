@@ -148,12 +148,14 @@ function updatePanelVisibility(mode) {
   if (!mode) return;
   currentMode = mode;
 
+  const panelCharging = document.getElementById("panel-charging");
   const panelIdle     = document.getElementById("panel-idle");
   const panelShopping = document.getElementById("panel-shopping");
   const panelLocked   = document.getElementById("panel-locked");
   const panelHalted   = document.getElementById("panel-halted");
 
   // 패널 전환
+  _setActive(panelCharging, mode === "CHARGING");
   _setActive(panelIdle,     mode === "IDLE");
   _setActive(panelShopping, SHOPPING_MODES.includes(mode));
   _setActive(panelLocked,   mode === "LOCKED" || mode === "RETURNING");
@@ -409,10 +411,12 @@ function closeMapOverlay() {
 // ── 쇼핑 종료 ──────────────────────────────────────────────────
 
 function requestReturn() {
+  let msg = "쑈삥끼 사용을 끝내시겠습니까?";
   if (hasUnpaidItems()) {
-    const ok = confirm("미결제 물건이 있습니다. 종료하면 카트가 잠길 수 있습니다.\n계속하시겠습니까?");
-    if (!ok) return;
+    msg += "\n\n⚠️ 미결제 항목이 있습니다. 종료 시 미결제 항목은 자동 반환처리됩니다.";
   }
+  const ok = confirm(msg);
+  if (!ok) return;
   socket.emit("return", {});
   sessionEnd();
 }

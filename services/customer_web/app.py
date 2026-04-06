@@ -230,6 +230,10 @@ def login():
             )
             if data is None:
                 flash("서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.")
+            elif data.get("error") == "robot is charging":
+                return redirect(url_for("blocked", robot_id=robot_id, reason="charging"))
+            elif data.get("error") == "robot is returning":
+                return redirect(url_for("blocked", robot_id=robot_id, reason="returning"))
             elif data.get("error") in ("robot already in session",):
                 return redirect(url_for("blocked", robot_id=robot_id))
             elif data.get("error") == "user already has active session":
@@ -258,11 +262,16 @@ def login():
 @app.route("/main")
 def main():
     if "session_id" not in session:
-        abort(400, description="세션이 만료되었습니다. 다시 접속해 주세요.")
+        robot_id = request.args.get("robot_id", "").strip()
+        return redirect(url_for("login", robot_id=robot_id) if robot_id else url_for("login"))
     robot_id = session.get("robot_id", "").strip()
     if not robot_id or robot_id not in KNOWN_ROBOT_IDS:
         session.clear()
-        abort(400, description="세션이 만료되었습니다. 다시 접속해 주세요.")
+        return redirect(url_for("login"))
+    # 쿼리파라미터의 robot_id가 세션과 다르면 접근 거부
+    requested_robot_id = request.args.get("robot_id", "").strip()
+    if requested_robot_id and requested_robot_id != robot_id:
+        return redirect(url_for("login", robot_id=robot_id))
     return render_template(
         "main.html",
         robot_id=robot_id,
@@ -275,7 +284,9 @@ def main():
 
 @app.route("/blocked")
 def blocked():
-    return render_template("blocked.html")
+    reason = request.args.get("reason", "")
+    robot_id = request.args.get("robot_id", "")
+    return render_template("blocked.html", reason=reason, robot_id=robot_id)
 
 
 @app.route("/logout", methods=["POST"])

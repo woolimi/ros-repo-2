@@ -210,7 +210,8 @@ class RobotManager:
         elif cmd == 'qr_scan':
             self._handle_qr_scan(robot_id, payload)
         elif cmd in ('navigate_to', 'mode', 'resume_tracking',
-                     'delete_item', 'start_session', 'enter_simulation'):
+                     'delete_item', 'start_session', 'enter_simulation',
+                     'return'):
             self._relay_to_pi(robot_id, payload)
         else:
             logger.warning('Unknown web cmd=%s', cmd)
