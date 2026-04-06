@@ -5,24 +5,30 @@ USE shoppinkki;
 -- ZONE (상품 구역 1~8, 특수 구역)
 -- ──────────────────────────────────────────────
 
+-- 좌표 기준: shop.yaml (origin=[-0.183,-1.773], resolution=0.01, 149×195px)
+-- 실측일: 2026-04-06
 INSERT INTO ZONE (zone_id, zone_name, zone_type, waypoint_x, waypoint_y, waypoint_theta) VALUES
--- 상품 구역
-(1,   '가전제품',  'product', 0.0, 0.0, 0.0),
-(2,   '과자',     'product', 0.0, 0.0, 0.0),
-(3,   '해산물',   'product', 0.0, 0.0, 0.0),
-(4,   '육류',     'product', 0.0, 0.0, 0.0),
-(5,   '채소',     'product', 0.0, 0.0, 0.0),
-(6,   '음료',     'product', 0.0, 0.0, 0.0),
-(7,   '베이커리', 'product', 0.0, 0.0, 0.0),
-(8,   '음식',     'product', 0.0, 0.0, 0.0),
+-- 상품 구역 (가전/과자/해산물: 위쪽·오른쪽 벽 복도, 빵·가공식품·음료: 내부)
+(1,   '가전제품',  'product',  0.619, -0.006,  0.0),     -- 가전제품1·2 중간
+(2,   '과자',     'product',  0.916, -0.004,  0.0),     -- 과자1
+(3,   '해산물',   'product',  1.145, -0.304,  3.1416),  -- 해산물2 (오른쪽 벽, 서향)
+(4,   '육류',     'product',  1.154, -0.754,  3.1416),  -- 육류1·2 중간 (오른쪽 벽, 서향)
+(5,   '채소',     'product',  1.154, -1.224,  3.1416),  -- 채소1 (오른쪽 벽, 서향)
+(6,   '음료',     'product',  0.704, -0.928,  0.0),     -- 음료1 (내부)
+(7,   '베이커리', 'product',  0.635, -0.288,  0.0),     -- 빵1·2 중간 (내부)
+(8,   '음식',     'product',  0.624, -0.604,  0.0),     -- 가공식품1·2 중간 (내부)
 -- 특수 구역
-(100, '화장실',   'special', 0.0, 0.0, 0.0),
-(110, '입구',     'special', 0.0, 0.0, 0.0),
-(120, '출구',     'special', 0.0, 0.0, 0.0),
-(140, '충전소 P1','special', 0.699, 0.100, 1.5708),
-(141, '충전소 P2','special', 0.939, 0.100, 1.5708),
-(150, '결제 구역','special', 0.0, 0.0, 0.0)
-ON DUPLICATE KEY UPDATE zone_name=VALUES(zone_name);
+(100, '화장실',   'special',  0.812, -1.606,  1.5708),  -- 화장실2
+(110, '입구',     'special', -0.009, -0.031,  0.0),     -- 입구1
+(120, '출구',     'special', -0.056, -1.617,  0.0),     -- 출구1
+(140, '충전소 P1','special',  0.002, -0.518,  0.0),     -- 재실측 (왼쪽 벽)
+(141, '충전소 P2','special',  0.002, -0.789,  0.0),     -- 재실측 (왼쪽 벽)
+(150, '결제 구역','special',  0.186, -1.614,  1.5708)   -- 결제구역1
+ON DUPLICATE KEY UPDATE
+  waypoint_x=VALUES(waypoint_x),
+  waypoint_y=VALUES(waypoint_y),
+  waypoint_theta=VALUES(waypoint_theta),
+  zone_name=VALUES(zone_name);
 
 -- ──────────────────────────────────────────────
 -- PRODUCT
@@ -43,10 +49,14 @@ ON DUPLICATE KEY UPDATE zone_id=VALUES(zone_id);
 -- BOUNDARY_CONFIG
 -- ──────────────────────────────────────────────
 
+-- 결제구역: 결제구역1(0.186,-1.614) · 결제구역2(0.183,-1.364) 기준 + 여유
+-- 맵외곽: origin(-0.183,-1.773) + 149×195px×0.01 = x[−0.18,1.31] y[−1.77,0.18] + 여유
 INSERT INTO BOUNDARY_CONFIG (description, x_min, x_max, y_min, y_max) VALUES
-('결제 구역',     1.0,  1.8,  -0.3, 0.5),
-('맵 외곽 경계',  -0.3, 1.6,  -1.7, 0.3)
-ON DUPLICATE KEY UPDATE description=VALUES(description);
+('결제 구역',    -0.10,  0.40, -1.70, -1.20),
+('맵 외곽 경계', -0.20,  1.35, -1.80,  0.20)
+ON DUPLICATE KEY UPDATE
+  x_min=VALUES(x_min), x_max=VALUES(x_max),
+  y_min=VALUES(y_min), y_max=VALUES(y_max);
 
 -- ──────────────────────────────────────────────
 -- ROBOT

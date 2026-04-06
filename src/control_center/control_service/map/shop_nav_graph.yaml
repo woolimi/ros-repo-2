@@ -1,0 +1,114 @@
+# shop_nav_graph.yaml
+# Open-RMF Navigation Graph — 쑈삥끼 미니어처 마트
+#
+# 맵 기준:
+#   실제 크기: 180 × 140 cm
+#   Nav2 맵: resolution=0.010m/px, origin=[-0.293, -1.660, 0]
+#
+# !! 좌표 미정 (TODO) !!
+#   아래 모든 x, y 값은 레이아웃 기반 추정값입니다.
+#   실제 로봇 운행 후 `ros2 topic echo /amcl_pose` 로 측정한 값으로 교체하세요.
+#   측정 방법: RViz "Publish Point" → `ros2 topic echo /clicked_point`
+#
+# 구역 ID → vertex 이름 매핑:
+#   zone 1=electronics, 2=snacks, 3=seafood, 4=meat, 5=vegetables
+#   zone 6=beverages, 7=bakery, 8=food
+#   zone 110=entrance, 120=exit, 130=charger
+#   zone 140=slot_1, 141=slot_2, 150=payment
+
+levels:
+  shop:
+    vertices:
+      # --- 하단 구역 (y ≈ 0.1 ~ 0.3) ---
+      # idx 0: 입구 (zone 110) — 하단 좌측
+      - [0.20, 0.10, {"name": "entrance"}]
+
+      # idx 1: 카트 충전소 (zone 130) — 하단 중앙
+      - [0.70, 0.10, {"name": "charger", "is_charger": true}]
+
+      # idx 2: 주차 슬롯 1 (zone 140) — 충전소 좌
+      - [0.55, 0.15, {"name": "slot_1", "is_parking_spot": true}]
+
+      # idx 3: 주차 슬롯 2 (zone 141) — 충전소 우
+      - [0.85, 0.15, {"name": "slot_2", "is_parking_spot": true}]
+
+      # idx 4: 결제/출구 구역 (zone 150/120) — 하단 우측
+      - [1.30, 0.10, {"name": "payment_exit"}]
+
+      # idx 5: 하단 중간 교차점 — 하단 복도↔중앙 복도 연결
+      - [0.70, 0.35, {"name": "junction_bottom"}]
+
+      # --- 좌측 구역 ---
+      # idx 6: 가전제품 (zone 1) — 좌측 하단 진열대
+      - [0.20, 0.45, {"name": "electronics"}]
+
+      # idx 7: 과자 (zone 2) — 좌측 상단 진열대
+      - [0.20, 0.90, {"name": "snacks"}]
+
+      # --- 상단 구역 (y ≈ 1.2) ---
+      # idx 8: 해산물 (zone 3) — 상단 좌
+      - [0.45, 1.25, {"name": "seafood"}]
+
+      # idx 9: 육류 (zone 4) — 상단 중
+      - [0.75, 1.25, {"name": "meat"}]
+
+      # idx 10: 채소 (zone 5) — 상단 우
+      - [1.05, 1.25, {"name": "vegetables"}]
+
+      # idx 11: 화장실 (zone 100) — 우측 상단
+      - [1.40, 1.20, {"name": "restroom"}]
+
+      # --- 중앙 구역 (y ≈ 0.7) ---
+      # idx 12: 베이커리 (zone 7) — 중앙 좌측 진열대 왼쪽
+      - [0.50, 0.70, {"name": "bakery"}]
+
+      # idx 13: 음식 (zone 8) — 중앙 좌측 진열대 오른쪽
+      - [0.65, 0.70, {"name": "food"}]
+
+      # idx 14: 음료 (zone 6) — 중앙 우측 진열대
+      - [1.30, 0.70, {"name": "beverages"}]
+
+      # idx 15: 중앙 교차점 — 중앙 복도 허브
+      - [0.75, 0.70, {"name": "junction_center"}]
+
+      # idx 16: 우측 복도 교차점 — 음료↔상단 우측 연결
+      - [1.30, 1.00, {"name": "junction_right"}]
+
+    lanes:
+      # ── 하단 복도 (입구 ↔ 충전소 ↔ 결제/출구) ──────────────────
+      - [0, 1, {"bidirectional": true}]   # entrance ↔ charger
+      - [1, 4, {"bidirectional": true}]   # charger ↔ payment_exit
+
+      # 충전소 → 주차 슬롯 (단방향: 귀환 시에만 진입)
+      - [1, 2, {}]                        # charger → slot_1
+      - [1, 3, {}]                        # charger → slot_2
+      - [2, 1, {}]                        # slot_1 → charger (출발)
+      - [3, 1, {}]                        # slot_2 → charger (출발)
+
+      # ── 하단 복도 ↔ 중앙 복도 ──────────────────────────────────
+      - [1, 5, {"bidirectional": true}]   # charger ↔ junction_bottom
+      - [5, 15, {"bidirectional": true}]  # junction_bottom ↔ junction_center
+
+      # ── 좌측 복도 (입구 → 가전 → 과자 → 해산물) ─────────────────
+      - [0, 6, {"bidirectional": true}]   # entrance ↔ electronics
+      - [6, 7, {"bidirectional": true}]   # electronics ↔ snacks
+      - [7, 8, {"bidirectional": true}]   # snacks ↔ seafood
+
+      # ── 상단 복도 (해산물 ↔ 육류 ↔ 채소 ↔ 화장실) ───────────────
+      - [8, 9, {"bidirectional": true}]   # seafood ↔ meat
+      - [9, 10, {"bidirectional": true}]  # meat ↔ vegetables
+      - [10, 11, {"bidirectional": true}] # vegetables ↔ restroom
+
+      # ── 중앙 복도 (중앙 교차점 ↔ 각 구역) ──────────────────────
+      - [15, 12, {"bidirectional": true}] # junction_center ↔ bakery
+      - [15, 13, {"bidirectional": true}] # junction_center ↔ food
+      - [15, 14, {"bidirectional": true}] # junction_center ↔ beverages
+      - [15, 9, {"bidirectional": true}]  # junction_center ↔ meat (상단 접근)
+
+      # ── 우측 복도 (음료 ↔ 우측 교차점 ↔ 채소/화장실 ↔ 결제) ──────
+      - [14, 16, {"bidirectional": true}] # beverages ↔ junction_right
+      - [16, 10, {"bidirectional": true}] # junction_right ↔ vegetables
+      - [16, 4, {"bidirectional": true}]  # junction_right ↔ payment_exit
+
+lifts: {}
+doors: {}

@@ -1,6 +1,42 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## 🤖 AI Coding Guidelines for Open-RMF Project
+
+이 프로젝트는 다수의 로봇(스마트 쇼핑 카트 등)을 제어하고 인프라와 연동하는 시스템입니다. AI는 코드를 작성하거나 디버깅을 도울 때 아래 규칙을 절대적으로 준수해야 합니다.
+
+### 1. 🛑 절대 엄수: 개발 환경 (Strict Environment Rules)
+* **OS & ROS Version:** Ubuntu 24.04 (Noble) / ROS 2 Jazzy Jalisco
+* **Python Environment:** 무조건 시스템 순정 파이썬(`/usr/bin/python3`, Python 3.12)만 사용합니다.
+* **[PROHIBITED]** Conda, venv 등 가상환경을 사용하는 명령어, 경로 설정, 패키지 설치 방법은 **절대 제안하지 마세요.** (의존성 설치는 오직 `rosdep`과 `apt`만 사용합니다.)
+
+### 2. 🗺️ Open-RMF 아키텍처 규칙 (Open-RMF Architecture)
+* **지도 및 경로 생성:** 구형 도구인 `traffic_editor` 대신, 최신 규격인 **`rmf_site_editor`**를 기준으로 맵 파일(`.site`)과 네비게이션 그래프를 생성하는 방법을 제안하세요.
+* **Fleet Adapter 구현:** * 로봇 하드웨어를 직접 제어하는 코드와 RMF Core와 통신하는 `fleet_adapter` 코드를 명확히 분리하세요.
+  * Python 기반의 `rmf_fleet_adapter_python` (Full Control 또는 Read Only 모드) API를 활용하여 작성하세요.
+* **메시지 타입:** 상태 보고 및 명령 하달 시 임의의 메시지 타입을 만들지 말고, 반드시 공식 `rmf_fleet_msgs`, `rmf_task_msgs`, `rmf_building_map_msgs` 패키지에 정의된 표준 인터페이스를 사용하세요.
+
+### 3. 🧑‍💻 ROS 2 Jazzy 코딩 컨벤션 (ROS 2 Coding Standards)
+* **Node 작성:** 파이썬(`rclpy`)과 C++(`rclcpp`) 모두 객체 지향적(OOP)으로 Class 기반의 Node를 작성하세요.
+* **로깅 (Logging):** 파이썬의 기본 `print()` 함수 사용을 엄격히 금지합니다. 무조건 ROS 표준 로거(`self.get_logger().info()`, `RCLCPP_INFO()`)를 사용하세요.
+* **QoS (Quality of Service):** 센서 데이터(IMU, LiDAR 등)는 `SensorDataQoS`, 제어 및 상태 메시지(RMF 통신)는 `Reliable` 정책을 명시적으로 설정하여 통신 유실을 방지하세요.
+
+### 4. 🛠️ 빌드 및 디버깅 지침 (Build & Debugging)
+* 빌드 명령어는 항상 `colcon build --symlink-install`을 기준으로 안내하세요.
+* C++ 컴파일 에러나 Python 모듈 에러 발생 시, 시스템 경로 꼬임(환경 변수) 문제를 가장 먼저 의심하고 해결책을 제시하세요.
+* 새로운 패키지나 의존성이 추가될 경우, 반드시 `package.xml`과 `CMakeLists.txt` (또는 `setup.py`) 양쪽에 누락 없이 추가하도록 코드를 제공하세요.
+
+### 5. 🏗️ 프로젝트 진행 순서 및 마일스톤 (Development Workflow)
+* **[CRITICAL] 현재 최우선 과제는 SLAM을 이용한 새로운 지도(Map) 생성입니다.** * RMF 연동이나 Fleet Adapter 개발을 논의하기 전에, 반드시 `slam_toolbox`와 Nav2를 활용하여 Gazebo/실제 환경의 2D Occupancy Grid Map(`.yaml`, `.pgm`)을 완벽하게 새로 뽑아내는 작업부터 먼저 제안하고 집중하세요.
+* 지도가 완성된 후에야 해당 지도를 `rmf_site_editor`에 올려서 RMF용 그래프(경로)를 그리는 다음 단계로 넘어갑니다.
+
+### 6. 🚫 레거시(기존) 코드 참조 금지 (Ignore Legacy RMF Code)
+* 기존에 작업되어 있던 Open-RMF 관련 코드나 파일들은 구조적 결함이 있을 수 있으므로 **절대 참조하거나 재사용하려고 시도하지 마세요.**
+* 기존 코드를 억지로 수정(Fix)하려 하지 말고, 완전히 새로운 아키텍처를 기반으로 **처음부터 새로(From Scratch) 구축**하는 코드를 제안하세요.
+
+### 7. 🗺️ Nav2 및 SLAM 가이드라인 (Nav2 & SLAM Toolbox)
+* SLAM을 수행할 때는 오래된 `gmapping` 등을 사용하지 말고, ROS 2 Jazzy의 표준인 **`slam_toolbox` (비동기 매핑 모드)**를 사용하도록 안내하세요.
+* 로봇의 자율주행(네비게이션) 파트는 반드시 **Nav2 (Navigation2)** 프레임워크를 기반으로 작성하며, Behavior Tree(`.xml`) 설정이나 파라미터 튜닝 시 Jazzy 버전에 맞는 최신 문법을 사용하세요.
 
 ## Project Overview
 
