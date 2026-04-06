@@ -47,7 +47,7 @@ lane_set     = {(l[0], l[1]) for l in lanes}
 drawn_bidir  = set()
 
 # ── 레이아웃: 맵(왼쪽) + 범례(오른쪽) ─────────────────────────────────────────
-fig = plt.figure(figsize=(20, 18), facecolor='#1a1a2e')
+fig = plt.figure(figsize=(28, 24), facecolor='#1a1a2e')
 ax_map = fig.add_axes([0.02, 0.02, 0.72, 0.94])   # 맵 영역
 ax_leg = fig.add_axes([0.76, 0.10, 0.22, 0.80])   # 범례 영역
 
@@ -57,8 +57,8 @@ ax_leg.axis('off')
 
 # ── 맵 이미지 (컬러맵 약간 밝게) ─────────────────────────────────────────────
 ax_map.imshow(img, cmap='gray', origin='upper', alpha=0.75)
-ax_map.set_title('ShopPinkki  Nav Graph', fontsize=17, color='white',
-                 fontweight='bold', pad=10)
+ax_map.set_title('ShopPinkki  Nav Graph', fontsize=22, color='white',
+                 fontweight='bold', pad=12)
 ax_map.axis('off')
 
 # ── Lane ─────────────────────────────────────────────────────────────────────
@@ -86,11 +86,11 @@ for lane in lanes:
 
 # ── Vertex ───────────────────────────────────────────────────────────────────
 STYLES = {
-    'charger':       dict(color='#69ff47', marker='*', ms=20, ec='white',  ew=1.2),
-    'holding_point': dict(color='#ffa726', marker='D', ms=13, ec='white',  ew=1.0),
-    'pickup_zone':   dict(color='#ffee58', marker='o', ms=11, ec='#555',   ew=0.8),
-    'detour':        dict(color='#ef9a9a', marker='^', ms=10, ec='white',  ew=0.8),
-    'default':       dict(color='#e0e0e0', marker='o', ms=9,  ec='#555',   ew=0.8),
+    'charger':       dict(color='#69ff47', marker='*', ms=28, ec='white',  ew=1.5),
+    'holding_point': dict(color='#ffa726', marker='D', ms=18, ec='white',  ew=1.2),
+    'pickup_zone':   dict(color='#ffee58', marker='o', ms=15, ec='#555',   ew=1.0),
+    'detour':        dict(color='#ef9a9a', marker='^', ms=14, ec='white',  ew=1.0),
+    'default':       dict(color='#e0e0e0', marker='o', ms=13, ec='#555',   ew=1.0),
 }
 
 for i, v in enumerate(vertices):
@@ -112,13 +112,13 @@ for i, v in enumerate(vertices):
     ax_map.plot(vx, vy, marker=s['marker'], color=s['color'], markersize=s['ms'],
                 markeredgecolor=s['ec'], markeredgewidth=s['ew'], zorder=6)
 
-    ax_map.text(vx + 6, vy - 6, f'{i}: {name}', fontsize=9.5, color='white',
+    ax_map.text(vx + 7, vy - 7, f'{i}: {name}', fontsize=13, color='white',
                 fontweight='bold', zorder=7,
-                bbox=dict(boxstyle='round,pad=0.25', fc='#111827', alpha=0.72, ec='none'))
+                bbox=dict(boxstyle='round,pad=0.3', fc='#111827', alpha=0.75, ec='none'))
 
 # ── 범례 패널 ─────────────────────────────────────────────────────────────────
 ax_leg.text(0.5, 0.97, 'Legend', transform=ax_leg.transAxes,
-            ha='center', va='top', fontsize=14, color='white', fontweight='bold')
+            ha='center', va='top', fontsize=18, color='white', fontweight='bold')
 
 legend_items = [
     ('Vertex', None),
@@ -137,29 +137,29 @@ for item in legend_items:
     label, style = item
     if style is None:
         ax_leg.text(0.05, y, label, transform=ax_leg.transAxes,
-                    fontsize=11, color='#aaaaaa', fontweight='bold')
+                    fontsize=14, color='#aaaaaa', fontweight='bold')
         y -= 0.06
         continue
     if style.get('line'):
         ax_leg.plot([0.05, 0.25], [y, y], transform=ax_leg.transAxes,
-                    color=style['color'], lw=2.5)
+                    color=style['color'], lw=3.0)
     else:
         ax_leg.plot(0.12, y, transform=ax_leg.transAxes,
                     marker=style['marker'], color=style['color'],
-                    markersize=style['ms'], markeredgecolor='white', markeredgewidth=0.8)
+                    markersize=style['ms'], markeredgecolor='white', markeredgewidth=1.0)
     ax_leg.text(0.30, y, label, transform=ax_leg.transAxes,
-                fontsize=11, color='white', va='center')
+                fontsize=13, color='white', va='center')
     y -= 0.075
 
 # 인덱스 목록
 ax_leg.text(0.05, y - 0.02, 'Waypoint Index', transform=ax_leg.transAxes,
-            fontsize=11, color='#aaaaaa', fontweight='bold')
+            fontsize=14, color='#aaaaaa', fontweight='bold')
 y -= 0.08
 for i, v in enumerate(vertices):
     params = v[2] if len(v) > 2 else {}
     name   = params.get('name', str(i))
     ax_leg.text(0.05, y, f'{i:2d}  {name}', transform=ax_leg.transAxes,
-                fontsize=8.5, color='#cccccc')
+                fontsize=11, color='#cccccc')
     y -= 0.037
     if y < 0.01:
         break
