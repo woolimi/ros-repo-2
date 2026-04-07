@@ -43,9 +43,9 @@ amcl:
     scan_topic: /robot_54/scan
     set_initial_pose: true
     initial_pose:
-      x: 0.020
-      y: -0.282
-      yaw: 0.0
+      x: 0.247
+      y: -0.324
+      yaw: 0.091
 
 bt_navigator:
   ros__parameters:

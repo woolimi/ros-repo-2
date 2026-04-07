@@ -32,6 +32,10 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
     tmux kill-session -t "$SESSION"
 fi
 
+# 좀비 Gazebo 프로세스 정리 (이전 세션이 제대로 종료되지 않은 경우 대비)
+pkill -9 -f "gz sim" 2>/dev/null || true
+sleep 1
+
 echo "[run_sim] tmux 세션 '$SESSION' 생성 중..."
 tmux set-option -g mouse on 2>/dev/null || true
 

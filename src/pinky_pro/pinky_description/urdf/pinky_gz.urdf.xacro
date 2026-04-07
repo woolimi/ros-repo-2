@@ -66,7 +66,7 @@
         </gazebo>
 
         <gazebo reference="rplidar_link">
-            <sensor name='gpu_lidar' type='gpu_lidar'>
+            <sensor name='gpu_lidar' type='lidar'>
                 <topic>${namespace}scan</topic>
                 <update_rate>10</update_rate>
                 <gz_frame_id>${namespace}rplidar_link</gz_frame_id>

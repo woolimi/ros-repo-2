@@ -14,6 +14,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
+    GroupAction,
     IncludeLaunchDescription,
     SetEnvironmentVariable,
     TimerAction,
@@ -22,7 +23,8 @@ from launch.launch_description_sources import (
     AnyLaunchDescriptionSource,
     PythonLaunchDescriptionSource,
 )
-from launch_ros.actions import Node
+from launch_ros.actions import Node, PushRosNamespace
+from nav2_common.launch import RewrittenYaml
 
 
 # ── 패키지 경로 ────────────────────────────────────────────────────────────────
@@ -45,8 +47,8 @@ ROBOTS = [
         # Gazebo 스폰 좌표 (Gazebo world frame)
         'x': '0.939', 'y': '0.120', 'z': '0.0',
         'yaw': '1.570796',
-        # 맵 프레임 좌표 (static TF + AMCL 초기 pose용)
-        'map_x': '0.020', 'map_y': '-0.282', 'map_yaw': '0.0',
+        # 맵 프레임 좌표 (static TF + AMCL 초기 pose용) — AMCL 수렴값으로 설정
+        'map_x': '0.247', 'map_y': '-0.324', 'map_yaw': '0.091',
     },
     {
         'id': '18',
@@ -65,7 +67,15 @@ def make_robot_actions(robot: dict, delay: float) -> list:
     """한 로봇에 대한 launch action 목록 생성 (스폰 + 브리지 + Nav2)."""
     ns = robot['ns']
     bridge_yaml = os.path.join(SHOPPINKKI_NAV, 'config', f'bridge_{ns}.yaml')
-    nav2_params = os.path.join(SHOPPINKKI_NAV, 'config', f'nav2_params_{ns}.yaml')
+    nav2_params_raw = os.path.join(SHOPPINKKI_NAV, 'config', f'nav2_params_{ns}.yaml')
+    # YAML 키에 namespace prefix 추가 (controller_server → robot_XX/controller_server)
+    # multi-robot 환경에서 /robot_XX/controller_server 노드가 params를 올바르게 매칭하도록
+    nav2_params = RewrittenYaml(
+        source_file=nav2_params_raw,
+        root_key=ns,
+        param_rewrites={},
+        convert_types=True,
+    )
 
     # 1) 로봇 description 업로드 (robot_state_publisher 포함)
     upload = IncludeLaunchDescription(
@@ -128,19 +138,39 @@ def make_robot_actions(robot: dict, delay: float) -> list:
         output='screen',
     )
 
-    # 4) Nav2 스택 (gz_bringup_launch.xml 내부에서 namespace 처리됨)
-    nav2 = IncludeLaunchDescription(
-        AnyLaunchDescriptionSource(
-            os.path.join(PINKY_NAV, 'launch', 'gz_bringup_launch.xml')
+    # 4) Nav2 스택 — localization + navigation 직접 호출 (component container 제거)
+    #    gz_bringup_launch.xml 우회: component_container_isolated가 params를 먼저 로드해
+    #    controller_server의 plugin 파라미터 매칭을 방해하는 문제 수정
+    nav2 = GroupAction([
+        PushRosNamespace(ns),
+        IncludeLaunchDescription(
+            AnyLaunchDescriptionSource(
+                os.path.join(PINKY_NAV, 'launch', 'localization_launch.xml')
+            ),
+            launch_arguments={
+                'namespace': ns,
+                'map': MAP_YAML,
+                'params_file': nav2_params,
+                'use_sim_time': 'True',
+            }.items(),
         ),
-        launch_arguments={
-            'namespace': ns,
-            'map': MAP_YAML,
-            'params_file': nav2_params,
-            'container_name': f'nav2_container_{ns}',
-            'use_sim_time': 'True',
-        }.items(),
-    )
+        IncludeLaunchDescription(
+            AnyLaunchDescriptionSource(
+                os.path.join(PINKY_NAV, 'launch', 'navigation_launch.xml')
+            ),
+            launch_arguments={
+                'params_file': nav2_params,
+                'use_sim_time': 'True',
+                # lifecycle_manager_navigation이 localization 노드(map_server, amcl)를
+                # 관리하려는 충돌 방지 — navigation 전용 노드만 명시
+                'lifecycle_nodes': (
+                    "['controller_server', 'smoother_server', 'planner_server',"
+                    " 'behavior_server', 'bt_navigator',"
+                    " 'waypoint_follower', 'velocity_smoother']"
+                ),
+            }.items(),
+        ),
+    ])
 
     # delay 적용 (두 번째 로봇은 첫 번째 이후에 스폰)
     actions = [upload, spawn, bridge, map_to_odom, nav2]
