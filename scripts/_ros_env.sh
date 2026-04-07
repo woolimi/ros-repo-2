@@ -195,11 +195,30 @@ fi
 
 _tmux_src_file="${TMUX_SETUP_FILE:-$ROS_SETUP_FILE}"
 
+# apt 설치 jazzy underlay 경로 (conda 환경 없는 Ubuntu에서 workspace setup.zsh 단독 소싱 시
+# rclpy 등 ROS 패키지 경로가 누락되는 문제 방지)
+_APT_JAZZY_SETUP=""
+for _f in "/opt/ros/jazzy/setup.zsh" "/opt/ros/jazzy/setup.bash"; do
+    [ -f "$_f" ] && { _APT_JAZZY_SETUP="$_f"; break; }
+done
+
+# workspace setup.zsh 가 colcon 빌드 시 underlay 체인을 포함하지 않을 수 있으므로
+# apt jazzy가 있고 workspace setup 파일이 workspace 경로인 경우 jazzy를 먼저 source
+_needs_jazzy_prefix=""
+if [ -n "$_APT_JAZZY_SETUP" ] && [ -z "$_CONDA_ENV_DIR" ] && [ -n "$_tmux_src_file" ]; then
+    case "$_tmux_src_file" in
+        "$_ROS_WS/"*) _needs_jazzy_prefix="$_APT_JAZZY_SETUP" ;;
+    esac
+fi
+
 if [ -n "$_CONDA_ACTIVATE" ] && [ -n "$_tmux_src_file" ]; then
     # setup.zsh 가 PATH 를 재배치할 수 있으므로, source 후 conda env bin 을 맨 앞에 복원
     TMUX_SRC="$_CONDA_ACTIVATE; source ${_tmux_src_file}; export PATH=${CONDA_BIN}:\$PATH"
 elif [ -n "$_CONDA_ACTIVATE" ]; then
     TMUX_SRC="$_CONDA_ACTIVATE"
+elif [ -n "$_needs_jazzy_prefix" ] && [ -n "$_tmux_src_file" ]; then
+    # apt jazzy를 먼저 source한 뒤 workspace local_setup 추가
+    TMUX_SRC="source ${_needs_jazzy_prefix} && source ${_tmux_src_file}"
 elif [ -n "$_tmux_src_file" ]; then
     TMUX_SRC="source ${_tmux_src_file}"
 else
