@@ -251,10 +251,22 @@ class ShoppinkiMainNode(Node):
 
     def _on_navigate_to(self, zone_id: int, x: float, y: float, theta: float) -> None:
         self.get_logger().info(f'navigate_to zone={zone_id} ({x:.2f}, {y:.2f}, {theta:.2f})')
-        # BT4 (bt_guiding) receives the goal via its own Nav2 client
-        # Here we just log; BT4 reads the goal from a shared data object
-        if hasattr(self._bt_guiding, 'set_goal'):
-            self._bt_guiding.set_goal(x, y, theta)
+        if self._nav2_client is None:
+            self.get_logger().warning('navigate_to: nav2_msgs not available')
+            return
+        if not self._nav2_client.server_is_ready():
+            self.get_logger().warning('navigate_to: Nav2 action server not ready')
+            return
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose = PoseStamped()
+        goal_msg.pose.header.frame_id = 'map'
+        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+        goal_msg.pose.pose.position.x = x
+        goal_msg.pose.pose.position.y = y
+        goal_msg.pose.pose.orientation.z = math.sin(theta / 2.0)
+        goal_msg.pose.pose.orientation.w = math.cos(theta / 2.0)
+        self._nav2_client.send_goal_async(goal_msg)
+        self.get_logger().info(f'navigate_to: Nav2 goal sent → ({x:.2f}, {y:.2f})')
 
     def _on_delete_item(self, item_id: int) -> None:
         self.get_logger().info(f'delete_item: id={item_id}')
