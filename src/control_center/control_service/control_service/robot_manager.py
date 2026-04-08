@@ -217,8 +217,8 @@ class RobotManager:
                 zone = db.get_zone(zone_id)
                 if zone:
                     payload = dict(payload,
-                                   x=zone['x'], y=zone['y'],
-                                   theta=zone.get('theta', 0.0))
+                                   x=zone['waypoint_x'], y=zone['waypoint_y'],
+                                   theta=zone.get('waypoint_theta', 0.0))
                 else:
                     logger.warning('navigate_to: zone_id=%s not found in DB', zone_id)
             self._relay_to_pi(robot_id, payload)

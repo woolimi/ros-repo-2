@@ -237,7 +237,7 @@ class ShoppinkiMainNode(Node):
         self.hw.buzz('alert')
 
     def _on_session_end(self) -> None:
-        self.get_logger().info('Session ended for robot %s', ROBOT_ID)
+        self.get_logger().info(f'Session ended for robot {ROBOT_ID}')
         self._cart_items = []
         self.follow_disabled = False
         self.bt_runner.follow_disabled = False
@@ -247,18 +247,17 @@ class ShoppinkiMainNode(Node):
     # ──────────────────────────────────────────
 
     def _on_start_session(self, user_id: str) -> None:
-        self.get_logger().info('Session started: user=%s', user_id)
+        self.get_logger().info(f'Session started: user={user_id}')
 
     def _on_navigate_to(self, zone_id: int, x: float, y: float, theta: float) -> None:
-        self.get_logger().info('navigate_to zone=%d (%.2f, %.2f, %.2f)',
-                               zone_id, x, y, theta)
+        self.get_logger().info(f'navigate_to zone={zone_id} ({x:.2f}, {y:.2f}, {theta:.2f})')
         # BT4 (bt_guiding) receives the goal via its own Nav2 client
         # Here we just log; BT4 reads the goal from a shared data object
         if hasattr(self._bt_guiding, 'set_goal'):
             self._bt_guiding.set_goal(x, y, theta)
 
     def _on_delete_item(self, item_id: int) -> None:
-        self.get_logger().info('delete_item: id=%d', item_id)
+        self.get_logger().info(f'delete_item: id={item_id}')
         self._cart_items = [i for i in self._cart_items if i.get('id') != item_id]
 
     def _on_enter_simulation(self) -> None:
