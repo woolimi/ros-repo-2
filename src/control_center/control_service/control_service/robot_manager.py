@@ -211,7 +211,18 @@ class RobotManager:
             self._handle_qr_scan(robot_id, payload)
         elif cmd == 'update_quantity':
             self._handle_update_quantity(robot_id, payload)
-        elif cmd in ('navigate_to', 'mode', 'resume_tracking',
+        elif cmd == 'navigate_to':
+            zone_id = payload.get('zone_id')
+            if zone_id is not None and 'x' not in payload:
+                zone = db.get_zone(zone_id)
+                if zone:
+                    payload = dict(payload,
+                                   x=zone['x'], y=zone['y'],
+                                   theta=zone.get('theta', 0.0))
+                else:
+                    logger.warning('navigate_to: zone_id=%s not found in DB', zone_id)
+            self._relay_to_pi(robot_id, payload)
+        elif cmd in ('mode', 'resume_tracking',
                      'delete_item', 'start_session', 'enter_simulation',
                      'return'):
             self._relay_to_pi(robot_id, payload)
