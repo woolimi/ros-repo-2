@@ -231,6 +231,54 @@ class FleetRouter:
         return []
 
     # ──────────────────────────────────────────
+    # Conflict detection
+    # ──────────────────────────────────────────
+
+    def detect_conflict(
+        self,
+        route: list[dict],
+        robot_id: str,
+    ) -> Optional[ConflictInfo]:
+        """``route`` (list of {x,y}) 가 다른 로봇의 예약 경로와 충돌하는지 검사.
+
+        3가지 충돌 유형을 순차 탐지 — 첫 매칭 상대만 반환:
+          - E_SHARE   : 같은 directed edge (u,v) 공유
+          - E_OPPOSE  : 역방향 edge (u,v) vs (v,u) — 좁은 통로 head-on
+          - V_CONVERGE: 서로 다른 edge 로 같은 non-holding intermediate vertex 수렴
+
+        홀딩 포인트(holding_point)로의 수렴은 충돌로 보지 않는다 (대기 가능 지점).
+        ``conflict_entry_idx`` 는 route 내 "충돌이 시작되는 vertex 인덱스"
+        (loser 가 양보 지점 선택 시 이 인덱스 직전까지 walk-back).
+        """
+        if not route or len(route) < 2:
+            return None
+
+        route_idx = self._route_to_idx_path(route)
+        if len(route_idx) < 2:
+            return None
+
+        with self._lock:
+            others = {rid: list(path) for rid, path in self._routes.items()
+                      if rid != robot_id and len(path) >= 2}
+
+        if not others:
+            return None
+
+        for partner_id, partner_path in others.items():
+            partner_edges = set(zip(partner_path, partner_path[1:]))
+            # edge i = (route_idx[i], route_idx[i+1]), i in [0, len-2]
+            for i in range(len(route_idx) - 1):
+                u, v = route_idx[i], route_idx[i + 1]
+                # E_SHARE
+                if (u, v) in partner_edges:
+                    exit_i = i + 1
+                    while exit_i < len(route_idx) - 1 \
+                            and (route_idx[exit_i], route_idx[exit_i + 1]) in partner_edges:
+                        exit_i += 1
+                    return ConflictInfo(partner_id, i, exit_i, 'E_SHARE')
+        return None
+
+    # ──────────────────────────────────────────
     # Lane reservation
     # ──────────────────────────────────────────
 

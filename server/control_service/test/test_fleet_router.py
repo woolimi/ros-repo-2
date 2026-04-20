@@ -126,3 +126,29 @@ class TestRoutesStorage:
         router.reserve('r1', router.plan('r1', (0.0, 0.0), 'C'))
         router.reserve('r1', router.plan('r1', (0.0, 0.0), 'D'))
         assert router._routes.get('r1') == [0, 3]  # A=0, D=3
+
+
+class TestDetectConflict:
+    def test_no_conflict_when_no_other_reservation(self, router):
+        my_route = router.plan('r1', (0.0, 0.0), 'C')
+        assert router.detect_conflict(my_route, 'r1') is None
+
+    def test_no_conflict_disjoint_routes(self, router):
+        # r2 reserves A→D; r1 plans A→B→C (no overlap)
+        r2_route = router.plan('r2', (0.0, 0.0), 'D')
+        router.reserve('r2', r2_route)
+        # Explicitly request A→B→C and verify it's NOT flagged as conflict
+        # (r2 is on A↔D, not A→B→C)
+        explicit = [{'x': 0.0, 'y': 0.0}, {'x': 1.0, 'y': 0.0}, {'x': 2.0, 'y': 0.0}]
+        assert router.detect_conflict(explicit, 'r1') is None
+
+    def test_e_share_same_direction(self, router):
+        r2_route = router.plan('r2', (0.0, 0.0), 'C')  # A→B→C
+        router.reserve('r2', r2_route)
+        # r1 plans the exact same edges
+        my_route = [{'x': 0.0, 'y': 0.0}, {'x': 1.0, 'y': 0.0}, {'x': 2.0, 'y': 0.0}]
+        info = router.detect_conflict(my_route, 'r1')
+        assert info is not None
+        assert info.partner_id == 'r2'
+        assert info.conflict_type == 'E_SHARE'
+        assert info.conflict_entry_idx == 0  # edge (A,B) is first conflict
