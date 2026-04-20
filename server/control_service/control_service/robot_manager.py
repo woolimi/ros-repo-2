@@ -998,6 +998,26 @@ class RobotManager:
             robot_id, 'YIELD_BACKOFF',
             detail=f'deadlock yield to {partner_id}')
 
+    # ──────────────────────────────────────────
+    # GUIDING preemptive yield
+    # ──────────────────────────────────────────
+
+    def _guiding_remaining(
+        self, state: 'RobotState', route: list[dict],
+    ) -> float:
+        """현재 위치 → route polyline 길이. route 가 비었거나 1개 이하면
+        (dest_x, dest_y) 까지 직선거리 fallback."""
+        if not route or len(route) < 2:
+            if state.dest_x is None or state.dest_y is None:
+                return 0.0
+            return math.hypot(state.dest_x - state.pos_x,
+                              state.dest_y - state.pos_y)
+        total = math.hypot(route[0]['x'] - state.pos_x,
+                           route[0]['y'] - state.pos_y)
+        for a, b in zip(route, route[1:]):
+            total += math.hypot(b['x'] - a['x'], b['y'] - a['y'])
+        return total
+
     def _plan_return_route(
         self, robot_id: str, pos_x: float, pos_y: float,
     ) -> list[dict]:

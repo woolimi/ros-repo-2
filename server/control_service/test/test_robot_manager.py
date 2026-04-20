@@ -451,3 +451,24 @@ class TestCheckoutZoneAutoReturnEmptyCart:
 
             rm.publish_cmd.assert_not_called()
             mock_db.end_session.assert_not_called()
+
+
+class TestGuidingYield:
+    def test_guiding_remaining_empty_route(self):
+        rm = make_rm()
+        rm.on_status('54', {'mode': 'GUIDING', 'pos_x': 0.0, 'pos_y': 0.0,
+                            'battery': 90.0, 'is_locked_return': False})
+        state = rm.get_state('54')
+        state.dest_x = 3.0
+        state.dest_y = 4.0
+        # Empty route → fallback to straight-line pos→dest = 5.0
+        assert abs(rm._guiding_remaining(state, []) - 5.0) < 1e-6
+
+    def test_guiding_remaining_polyline(self):
+        rm = make_rm()
+        rm.on_status('54', {'mode': 'GUIDING', 'pos_x': 0.0, 'pos_y': 0.0,
+                            'battery': 90.0, 'is_locked_return': False})
+        state = rm.get_state('54')
+        route = [{'x': 1.0, 'y': 0.0}, {'x': 1.0, 'y': 3.0}, {'x': 4.0, 'y': 3.0}]
+        # 0→(1,0) = 1.0; (1,0)→(1,3) = 3.0; (1,3)→(4,3) = 3.0. Total 7.0.
+        assert abs(rm._guiding_remaining(state, route) - 7.0) < 1e-6
