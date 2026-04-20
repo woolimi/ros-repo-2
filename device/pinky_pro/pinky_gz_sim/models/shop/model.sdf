@@ -3,7 +3,7 @@
   <!--
     Shop map with corrected dimensions and collision boxes.
     Origin: Inner corner of west and south walls (bottom-left)
-    Map: 1.88 x 1.41 m
+    Map: 1.88 x 1.44 m
     Wall thickness: 0.02 m (2cm)
     Divider thickness: 0.005 m (5mm)
     Collision height z=0.35 m (pose z=0.175)
@@ -16,7 +16,7 @@
         <geometry>
           <mesh>
             <uri>meshes/shop.dae</uri>
-            <scale>1.044444 1 1</scale>
+            <scale>1.044444 1.021277 1</scale>
           </mesh>
         </geometry>
       </visual>
@@ -32,9 +32,9 @@
         </geometry>
       </collision>
 
-      <!-- North wall: Y = 1.42, thickness 0.02, length 1.88 -->
+      <!-- North wall: Y = 1.45, thickness 0.02, length 1.88 -->
       <collision name="wall_north">
-        <pose>0.94 1.42 0.175 0 0 0</pose>
+        <pose>0.94 1.45 0.175 0 0 0</pose>
         <geometry>
           <box>
             <size>1.88 0.02 0.35</size>
@@ -42,31 +42,31 @@
         </geometry>
       </collision>
 
-      <!-- West wall: X = -0.01, thickness 0.02, height 1.41 -->
+      <!-- West wall: X = -0.01, thickness 0.02, height 1.44 -->
       <collision name="wall_west">
-        <pose>-0.01 0.705 0.175 0 0 0</pose>
+        <pose>-0.01 0.72 0.175 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.02 1.41 0.35</size>
+            <size>0.02 1.44 0.35</size>
           </box>
         </geometry>
       </collision>
 
-      <!-- East wall: X = 1.89, thickness 0.02, height 1.41 -->
+      <!-- East wall: X = 1.89, thickness 0.02, height 1.44 -->
       <collision name="wall_east">
-        <pose>1.89 0.705 0.175 0 0 0</pose>
+        <pose>1.89 0.72 0.175 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.02 1.41 0.35</size>
+            <size>0.02 1.44 0.35</size>
           </box>
         </geometry>
       </collision>
 
       <!-- ===== NORTH WALL PRODUCTS ===== -->
-      <!-- North wall outer face Y=1.43, sections protrude outward (north) -->
+      <!-- North wall outer face Y=1.46, sections protrude outward (north) -->
       <!-- Seafood: 0~54cm, depth 5cm -->
       <collision name="section_seafood">
-        <pose>0.27 1.435 0.175 0 0 0</pose>
+        <pose>0.27 1.465 0.175 0 0 0</pose>
         <geometry>
           <box>
             <size>0.54 0.05 0.35</size>
@@ -76,7 +76,7 @@
 
       <!-- Meat: 61~113cm, depth 5cm -->
       <collision name="section_meat">
-        <pose>0.87 1.435 0.175 0 0 0</pose>
+        <pose>0.87 1.465 0.175 0 0 0</pose>
         <geometry>
           <box>
             <size>0.52 0.05 0.35</size>
@@ -86,7 +86,7 @@
 
       <!-- Vegetable: 130~189cm, depth 5cm -->
       <collision name="section_vegetable">
-        <pose>1.595 1.435 0.175 0 0 0</pose>
+        <pose>1.595 1.465 0.175 0 0 0</pose>
         <geometry>
           <box>
             <size>0.59 0.05 0.35</size>
@@ -96,12 +96,12 @@
 
       <!-- ===== WEST WALL PRODUCTS ===== -->
       <!-- West wall outer face X=-0.02, sections protrude outward (west) -->
-      <!-- Snacks: Y=99~141cm, depth 5cm -->
+      <!-- Snacks: Y=99~144cm, depth 5cm -->
       <collision name="section_snacks">
-        <pose>-0.045 1.20 0.175 0 0 0</pose>
+        <pose>-0.045 1.215 0.175 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.05 0.42 0.35</size>
+            <size>0.05 0.45 0.35</size>
           </box>
         </geometry>
       </collision>
@@ -117,12 +117,12 @@
       </collision>
 
       <!-- ===== EAST WALL PRODUCTS ===== -->
-      <!-- Restroom: Y=99~141cm, depth 5cm -->
+      <!-- Restroom: Y=99~144cm, depth 5cm -->
       <collision name="section_restroom">
-        <pose>1.915 1.20 0.175 0 0 0</pose>
+        <pose>1.915 1.215 0.175 0 0 0</pose>
         <geometry>
           <box>
-            <size>0.05 0.42 0.35</size>
+            <size>0.05 0.45 0.35</size>
           </box>
         </geometry>
       </collision>

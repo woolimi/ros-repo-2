@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 # Large enough to detour, not infinite so we fall back to the shortest
 # path (possibly shared) when no alternative exists.
 _RESERVED_EDGE_PENALTY = 1000
+# Weight added to an edge whose destination vertex is currently occupied
+# by another robot (physical position). Higher than reservation penalty so
+# we prefer detouring around stopped/slow robots.
+_BLOCKED_VERTEX_PENALTY = 5000
 
 
 class FleetRouter:
@@ -73,12 +77,18 @@ class FleetRouter:
         robot_id: str,
         from_xy: tuple[float, float],
         dest_name: str,
+        blocked_vertices: Optional[set[str]] = None,
     ) -> list[dict]:
         """Return a list of ``{x, y}`` waypoints from current pose to dest.
 
         Edges reserved by *other* robots are heavily penalized so we detour
         when possible; when the only path is blocked we still return it
         (Nav2 will handle local avoidance).
+
+        ``blocked_vertices`` is an optional set of waypoint names that are
+        currently occupied by other robots (by live position). Any edge
+        whose destination is in that set gets an extra large penalty so we
+        route around standing robots instead of trying to pass through them.
         """
         waypoints, lanes = self._load_graph()
         if not waypoints or not lanes:
@@ -108,7 +118,16 @@ class FleetRouter:
             reserved = {e: owner for e, owner in self._edges.items()
                         if owner != robot_id}
 
-        path_idx = self._dijkstra(adj, wp_by_idx, start_idx, dest_idx, reserved)
+        blocked_idx: set[int] = set()
+        if blocked_vertices:
+            for name in blocked_vertices:
+                wp = wp_by_name.get(name)
+                if wp is not None and wp['idx'] != dest_idx:
+                    # 목적지 자체가 blocked로 들어오면 회피 불가 — 그대로 진행
+                    blocked_idx.add(wp['idx'])
+
+        path_idx = self._dijkstra(
+            adj, wp_by_idx, start_idx, dest_idx, reserved, blocked_idx)
         if not path_idx:
             # Graph disconnected — fall back to a direct hop
             return [{'x': rx, 'y': ry},
@@ -134,10 +153,13 @@ class FleetRouter:
         start: int,
         dest: int,
         reserved: dict[tuple[int, int], str],
+        blocked_idx: Optional[set[int]] = None,
     ) -> list[int]:
         """Shortest weighted path. Edge cost = euclidean distance +
-        penalty when the edge is reserved by another robot."""
+        penalty when the edge is reserved by another robot or when the
+        destination vertex is physically occupied by another robot."""
         import heapq
+        blocked_idx = blocked_idx or set()
 
         dist: dict[int, float] = {start: 0.0}
         prev: dict[int, int] = {}
@@ -160,6 +182,8 @@ class FleetRouter:
                                   nxt_wp['y'] - node_wp['y'])
                 if (node, nxt) in reserved:
                     step += _RESERVED_EDGE_PENALTY
+                if nxt in blocked_idx and nxt != dest:
+                    step += _BLOCKED_VERTEX_PENALTY
                 nd = d + step
                 if nd < dist.get(nxt, float('inf')):
                     dist[nxt] = nd

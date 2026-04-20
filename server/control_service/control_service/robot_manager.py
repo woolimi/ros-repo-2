@@ -84,6 +84,10 @@ class RobotManager:
         self._pending_navigate: dict[str, dict] = {}
         # 마지막 navigate_to dispatch 시각 (로봇별) — dispatch 간 최소 시차 enforce
         self._last_navigate_dispatch: dict[str, float] = {}
+        # RETURNING 데드락 탐지용 — (pos_x, pos_y, 최근이동_monotonic_ts)
+        self._returning_last_moved: dict[str, tuple[float, float, float]] = {}
+        # 마지막 yield backoff 시각 — 반복 teleport 방지
+        self._last_backoff_at: dict[str, float] = {}
 
         # Inject after construction
         self.publish_cmd:      Optional[Callable[[str, dict], None]] = None
@@ -168,27 +172,8 @@ class RobotManager:
             )
             if state.mode == 'RETURNING':
                 self._end_session_if_no_unpaid_on_returning(robot_id)
-                # RETURNING 진입 시 충전소까지 경로 계산
-                charger = 'P2' if robot_id == '54' else 'P1'
-                # 하단 구역(y < -1.2)이면 출구2 → 하단_복도 경유 경로
-                if state.pos_y < -1.2:
-                    exit2 = {'x': 0.0, 'y': -1.402}
-                    lower_corridor = {'x': 0.0, 'y': -1.137}
-                    lower_entrance = {'x': 0.245, 'y': -1.137}
-                    row3_entrance = {'x': 0.245, 'y': -0.899}
-                    if charger == 'P2':
-                        route = [{'x': state.pos_x, 'y': state.pos_y},
-                                 exit2, lower_corridor, lower_entrance,
-                                 row3_entrance, {'x': 0.0, 'y': -0.899}]
-                    else:
-                        row2_entrance = {'x': 0.245, 'y': -0.606}
-                        route = [{'x': state.pos_x, 'y': state.pos_y},
-                                 exit2, lower_corridor, lower_entrance,
-                                 row3_entrance, row2_entrance,
-                                 {'x': 0.0, 'y': -0.606}]
-                else:
-                    route = self._router.plan(
-                        robot_id, (state.pos_x, state.pos_y), charger)
+                # RETURNING 진입 시 충전소까지 경로 계산 (다른 로봇 위치 회피)
+                route = self._plan_return_route(robot_id, state.pos_x, state.pos_y)
                 with self._lock:
                     state.path = route
                 self._router.reserve(robot_id, route)
@@ -201,6 +186,21 @@ class RobotManager:
                     state.dest_x = None
                     state.dest_y = None
                 self._router.release(robot_id)
+
+        # RETURNING 중에는 매 tick 재계획해서 다른 로봇 위치 변화에 반응.
+        # 새 route가 기존과 다르면 reservation 갱신 + UI push.
+        if state.mode == 'RETURNING':
+            new_route = self._plan_return_route(
+                robot_id, state.pos_x, state.pos_y)
+            if new_route and new_route != state.path:
+                with self._lock:
+                    state.path = new_route
+                self._router.reserve(robot_id, new_route)
+            # 데드락 탐지: 두 로봇이 너무 가까워 둘 다 못 움직이는 경우 yield.
+            try:
+                self._resolve_returning_deadlock(robot_id, state)
+            except Exception:
+                logger.exception('returning deadlock resolver failed')
 
         # Push status update to admin and web
         self._push_status(robot_id, state)
@@ -540,7 +540,9 @@ class RobotManager:
                 with self._lock:
                     st = self._get_or_create(robot_id)
                     rx, ry = st.pos_x, st.pos_y
-                route = self._router.plan(robot_id, (rx, ry), wp_name)
+                blocked = self._vertices_blocked_by_others(robot_id)
+                route = self._router.plan(
+                    robot_id, (rx, ry), wp_name, blocked_vertices=blocked)
                 self._push_web(robot_id, {
                     'type': 'find_product_path',
                     'robot_id': robot_id,
@@ -887,6 +889,155 @@ class RobotManager:
     # 멈추는 것을 방지.
     _STAGGER_WINDOW_S = 5.0
     _STAGGER_RADIUS = 1.0
+    # 경로계획 시 "다른 로봇의 현 위치가 이 반경 안에 있는 vertex"를 blocked로
+    # 간주 — 그 vertex로 향하는 edge에 큰 penalty 부여하여 우회.
+    _VERTEX_BLOCK_RADIUS = 0.25
+
+    # RETURNING 데드락 파라미터
+    _DEADLOCK_PROXIMITY = 0.35   # 두 로봇이 이 거리 이내 + 둘 다 정지면 deadlock
+    _DEADLOCK_STATIONARY_S = 5.0  # 이 시간만큼 안 움직이면 정지로 간주
+    _DEADLOCK_MOVE_EPSILON = 0.05  # 이만큼 넘게 이동해야 "움직임"으로 인정
+    _DEADLOCK_BACKOFF_M = 0.35    # yield 로봇을 반대 방향으로 이 거리 teleport
+    _DEADLOCK_BACKOFF_COOLDOWN_S = 8.0  # 연속 teleport 방지
+
+    def _resolve_returning_deadlock(
+        self, robot_id: str, state: RobotState,
+    ) -> None:
+        """두 로봇이 RETURNING 중 너무 가까워 움직이지 못하면 한 쪽을
+        반대 방향으로 teleport(시뮬)해서 데드락 해제.
+
+        Yield 선택: robot_id 사전순으로 나중이 yield. (54 > 18 → 54 yield)
+        """
+        now = time.monotonic()
+
+        # 내 정지 상태 추적
+        last = self._returning_last_moved.get(robot_id)
+        if last is None:
+            self._returning_last_moved[robot_id] = (
+                state.pos_x, state.pos_y, now)
+            return
+        lx, ly, lt = last
+        moved = math.hypot(state.pos_x - lx, state.pos_y - ly) \
+            > self._DEADLOCK_MOVE_EPSILON
+        if moved:
+            self._returning_last_moved[robot_id] = (
+                state.pos_x, state.pos_y, now)
+            return
+        if now - lt < self._DEADLOCK_STATIONARY_S:
+            return
+
+        # 근거리 RETURNING 상대 로봇 찾기
+        partner_id: Optional[str] = None
+        partner_pos: Optional[tuple[float, float]] = None
+        with self._lock:
+            for rid, other in self._states.items():
+                if rid == robot_id or other.mode != 'RETURNING':
+                    continue
+                if math.hypot(other.pos_x - state.pos_x,
+                              other.pos_y - state.pos_y) \
+                        < self._DEADLOCK_PROXIMITY:
+                    partner_id = rid
+                    partner_pos = (other.pos_x, other.pos_y)
+                    break
+        if partner_id is None or partner_pos is None:
+            return
+
+        # Yield 결정 — 사전순 나중(=더 큰 ID)가 양보
+        if robot_id <= partner_id:
+            return
+
+        # teleport cooldown
+        if now - self._last_backoff_at.get(robot_id, 0.0) \
+                < self._DEADLOCK_BACKOFF_COOLDOWN_S:
+            return
+
+        # 반대 방향 단위벡터
+        dx = state.pos_x - partner_pos[0]
+        dy = state.pos_y - partner_pos[1]
+        d = math.hypot(dx, dy)
+        if d < 1e-3:
+            # 완전히 겹치면 +x 방향으로 대피
+            ux, uy = 1.0, 0.0
+        else:
+            ux, uy = dx / d, dy / d
+        back_x = state.pos_x + ux * self._DEADLOCK_BACKOFF_M
+        back_y = state.pos_y + uy * self._DEADLOCK_BACKOFF_M
+        back_theta = state.yaw
+
+        adjust = self.adjust_position_in_sim
+        if adjust is None:
+            logger.warning(
+                'deadlock yield needed (robot=%s ↔ %s) but sim teleport '
+                'unavailable — skipping (real robot needs manual unstuck)',
+                robot_id, partner_id)
+            return
+
+        try:
+            ok = bool(adjust(robot_id, back_x, back_y, back_theta))
+        except Exception:
+            logger.exception('deadlock teleport failed (robot=%s)', robot_id)
+            return
+
+        if not ok:
+            return
+
+        self._last_backoff_at[robot_id] = now
+        # 방금 옮긴 위치를 기준으로 다시 정지 타이머 초기화
+        self._returning_last_moved[robot_id] = (back_x, back_y, now)
+        logger.info(
+            'RETURNING deadlock: robot=%s yields to robot=%s → '
+            'teleport (%.3f, %.3f)',
+            robot_id, partner_id, back_x, back_y,
+        )
+        # UI에 즉시 반영 + 이벤트 push
+        with self._lock:
+            state.pos_x = back_x
+            state.pos_y = back_y
+            state.yaw = back_theta
+        self._push_event(
+            robot_id, 'YIELD_BACKOFF',
+            detail=f'deadlock yield to {partner_id}')
+
+    def _plan_return_route(
+        self, robot_id: str, pos_x: float, pos_y: float,
+    ) -> list[dict]:
+        """RETURNING용 충전소 복귀 경로 — 다른 로봇 위치 회피.
+
+        하단 구역(y < -1.2 AND x < 0.3)은 그래프 노드가 없는 좁은 통로이므로
+        고정 경유점(출구2 → 하단_복도)을 먼저 붙이고 나머지는 그래프 plan.
+        """
+        charger = 'P2' if robot_id == '54' else 'P1'
+        blocked = self._vertices_blocked_by_others(robot_id)
+        if pos_y < -1.2 and pos_x < 0.3:
+            exit2 = {'x': 0.0, 'y': -1.402}
+            lower_corridor = {'x': 0.0, 'y': -1.137}
+            tail = self._router.plan(
+                robot_id, (lower_corridor['x'], lower_corridor['y']),
+                charger, blocked_vertices=blocked)
+            # tail은 그래프 시작 waypoint부터 시작. 중복 방지 위해 앞단 합치기.
+            return [{'x': pos_x, 'y': pos_y}, exit2, lower_corridor, *tail]
+        return self._router.plan(
+            robot_id, (pos_x, pos_y), charger, blocked_vertices=blocked)
+
+    def _vertices_blocked_by_others(self, robot_id: str) -> set[str]:
+        """내가 아닌 다른 로봇이 _VERTEX_BLOCK_RADIUS 이내에 있는 vertex 이름 집합."""
+        try:
+            waypoints = db.get_fleet_waypoints()
+        except Exception:
+            return set()
+        blocked: set[str] = set()
+        with self._lock:
+            others = [(st.pos_x, st.pos_y) for rid, st in self._states.items()
+                      if rid != robot_id]
+        if not others:
+            return blocked
+        for wp in waypoints:
+            wx, wy = float(wp['x']), float(wp['y'])
+            for ox, oy in others:
+                if math.hypot(wx - ox, wy - oy) <= self._VERTEX_BLOCK_RADIUS:
+                    blocked.add(wp['name'])
+                    break
+        return blocked
 
     def _path_blocked_by(
         self, robot_id: str, route: list[dict]
@@ -932,8 +1083,11 @@ class RobotManager:
                 st.dest_x = float(wp['x'])
                 st.dest_y = float(wp['y'])
 
-        route = self._router.plan(robot_id, (rx, ry), wp_name)
-        logger.info('navigate_to: wp=%s, route=%d points', wp_name, len(route))
+        blocked = self._vertices_blocked_by_others(robot_id)
+        route = self._router.plan(
+            robot_id, (rx, ry), wp_name, blocked_vertices=blocked)
+        logger.info('navigate_to: wp=%s, route=%d points (blocked=%d)',
+                    wp_name, len(route), len(blocked))
 
         # 계획된 경로를 즉시 state에 반영하고 UI에 push.
         # stagger/block으로 Pi dispatch가 지연되더라도 admin/customer UI는

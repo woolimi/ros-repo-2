@@ -171,7 +171,10 @@ def create_app(robot_manager: 'RobotManager',
         if not dest:
             return jsonify({'error': 'dest required'}), 400
         rid = request.args.get('robot_id', '')
-        route = robot_manager._router.plan(rid, (from_x, from_y), dest)
+        # 다른 로봇의 현 위치를 회피하도록 blocked vertex 반영
+        blocked = robot_manager._vertices_blocked_by_others(rid) if rid else set()
+        route = robot_manager._router.plan(
+            rid, (from_x, from_y), dest, blocked_vertices=blocked)
         return jsonify({'route': route})
 
     # ── Boundary ──────────────────────────────
