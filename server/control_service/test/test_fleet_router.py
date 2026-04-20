@@ -154,13 +154,57 @@ class TestDetectConflict:
         assert info.conflict_entry_idx == 0  # edge (A,B) is first conflict
 
     def test_e_oppose_head_on(self, router):
-        # r2 reserves A→B→C (edges (0,1), (1,2))
-        r2_route = router.plan('r2', (0.0, 0.0), 'C')
+        # r2 reserves A→B only (path [0,1], no intermediate mids → no V_CONVERGE).
+        # r1 plans B→A (edge (1,0)); (0,1) is in partner_edges → E_OPPOSE.
+        r2_route = [{'x': 0.0, 'y': 0.0}, {'x': 1.0, 'y': 0.0}]  # A→B
         router.reserve('r2', r2_route)
-        # r1 plans the reverse C→B→A (edges (2,1), (1,0))
-        my_route = [{'x': 2.0, 'y': 0.0}, {'x': 1.0, 'y': 0.0}, {'x': 0.0, 'y': 0.0}]
+        my_route = [{'x': 1.0, 'y': 0.0}, {'x': 0.0, 'y': 0.0}]  # B→A
         info = router.detect_conflict(my_route, 'r1')
         assert info is not None
         assert info.partner_id == 'r2'
         assert info.conflict_type == 'E_OPPOSE'
         assert info.conflict_entry_idx == 0
+
+    def test_v_converge_non_holding(self, router):
+        # r2 reserves D→A→B→C (path: 3→0→1→2; B=idx 1 is intermediate, non-holding)
+        r2_route = [
+            {'x': 0.0, 'y': 1.0},  # D
+            {'x': 0.0, 'y': 0.0},  # A
+            {'x': 1.0, 'y': 0.0},  # B
+            {'x': 2.0, 'y': 0.0},  # C
+        ]
+        router.reserve('r2', r2_route)
+        # r1 plans E→C→B→A (path: 4→2→1→0); B is intermediate for r1 too.
+        # r1 edges: (4,2), (2,1), (1,0). None match r2 edges (3,0),(0,1),(1,2) or their reverse.
+        # But B (idx=1) appears as intermediate vertex for both → V_CONVERGE.
+        my_route = [
+            {'x': 2.0, 'y': 1.0},  # E
+            {'x': 2.0, 'y': 0.0},  # C
+            {'x': 1.0, 'y': 0.0},  # B
+            {'x': 0.0, 'y': 0.0},  # A
+        ]
+        info = router.detect_conflict(my_route, 'r1')
+        assert info is not None
+        assert info.conflict_type == 'V_CONVERGE'
+
+    def test_v_converge_skipped_if_holding_point(self, router):
+        # A (idx=0) is holding_point=True per fixture.
+        # r2 reserves D→A→B — A is intermediate (holding_point).
+        r2_route = [
+            {'x': 0.0, 'y': 1.0},  # D
+            {'x': 0.0, 'y': 0.0},  # A (holding_point)
+            {'x': 1.0, 'y': 0.0},  # B
+        ]
+        router.reserve('r2', r2_route)
+        # r1: B→A→D — A is intermediate for r1 too, but it's a holding_point.
+        my_route = [
+            {'x': 1.0, 'y': 0.0},  # B
+            {'x': 0.0, 'y': 0.0},  # A (holding_point)
+            {'x': 0.0, 'y': 1.0},  # D
+        ]
+        # r1 edges: (1,0), (0,3). r2 edges: (3,0), (0,1).
+        # (1,0) vs r2 — (0,1) is reverse → E_OPPOSE fires first.
+        # Key assertion: if anything returned, it's NOT V_CONVERGE (holding_point skipped).
+        info = router.detect_conflict(my_route, 'r1')
+        if info is not None:
+            assert info.conflict_type != 'V_CONVERGE'

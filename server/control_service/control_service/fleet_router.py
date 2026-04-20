@@ -253,6 +253,9 @@ class FleetRouter:
         if not route or len(route) < 2:
             return None
 
+        waypoints, _ = self._load_graph()
+        wp_by_idx = {w['idx']: w for w in waypoints}
+
         route_idx = self._route_to_idx_path(route)
         if len(route_idx) < 2:
             return None
@@ -266,7 +269,7 @@ class FleetRouter:
 
         for partner_id, partner_path in others.items():
             partner_edges = set(zip(partner_path, partner_path[1:]))
-            # edge i = (route_idx[i], route_idx[i+1]), i in [0, len-2]
+            partner_mids = set(partner_path[1:-1]) if len(partner_path) >= 3 else set()
             for i in range(len(route_idx) - 1):
                 u, v = route_idx[i], route_idx[i + 1]
                 # E_SHARE
@@ -276,6 +279,11 @@ class FleetRouter:
                             and (route_idx[exit_i], route_idx[exit_i + 1]) in partner_edges:
                         exit_i += 1
                     return ConflictInfo(partner_id, i, exit_i, 'E_SHARE')
+                # V_CONVERGE: v is intermediate for both, non-holding
+                if i < len(route_idx) - 2 and v in partner_mids:
+                    wv = wp_by_idx.get(v, {})
+                    if not wv.get('holding_point', False):
+                        return ConflictInfo(partner_id, i, i + 1, 'V_CONVERGE')
                 # E_OPPOSE
                 if (v, u) in partner_edges:
                     exit_i = i + 1
