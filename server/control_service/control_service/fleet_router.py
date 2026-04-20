@@ -13,6 +13,7 @@ import logging
 import math
 import threading
 from collections import deque
+from dataclasses import dataclass
 from typing import Optional
 
 from . import db
@@ -27,6 +28,16 @@ _RESERVED_EDGE_PENALTY = 1000
 # by another robot (physical position). Higher than reservation penalty so
 # we prefer detouring around stopped/slow robots.
 _BLOCKED_VERTEX_PENALTY = 5000
+
+
+@dataclass
+class ConflictInfo:
+    """Describes a conflict between the querying robot's planned route
+    and another robot's reserved route."""
+    partner_id: str
+    conflict_entry_idx: int   # index within route_a where conflict starts
+    conflict_exit_idx: int    # last vertex index (inclusive) still in conflict
+    conflict_type: str        # 'E_SHARE' | 'E_OPPOSE' | 'V_CONVERGE'
 
 
 class FleetRouter:

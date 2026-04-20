@@ -16,11 +16,11 @@ from control_service.fleet_router import FleetRouter
 # All lanes bidirectional (seeded as pairs of one-way lanes, like the real
 # fleet_lane table).
 _WAYPOINTS = [
-    {'idx': 0, 'name': 'A', 'x': 0.0, 'y': 0.0, 'theta': 0.0},
-    {'idx': 1, 'name': 'B', 'x': 1.0, 'y': 0.0, 'theta': 0.0},
-    {'idx': 2, 'name': 'C', 'x': 2.0, 'y': 0.0, 'theta': 0.0},
-    {'idx': 3, 'name': 'D', 'x': 0.0, 'y': 1.0, 'theta': 0.0},
-    {'idx': 4, 'name': 'E', 'x': 2.0, 'y': 1.0, 'theta': 0.0},
+    {'idx': 0, 'name': 'A', 'x': 0.0, 'y': 0.0, 'theta': 0.0, 'holding_point': True},
+    {'idx': 1, 'name': 'B', 'x': 1.0, 'y': 0.0, 'theta': 0.0, 'holding_point': False},
+    {'idx': 2, 'name': 'C', 'x': 2.0, 'y': 0.0, 'theta': 0.0, 'holding_point': True},
+    {'idx': 3, 'name': 'D', 'x': 0.0, 'y': 1.0, 'theta': 0.0, 'holding_point': False},
+    {'idx': 4, 'name': 'E', 'x': 2.0, 'y': 1.0, 'theta': 0.0, 'holding_point': False},
 ]
 _LANES = [
     {'from_idx': 0, 'to_idx': 1}, {'from_idx': 1, 'to_idx': 0},
