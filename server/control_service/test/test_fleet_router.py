@@ -109,3 +109,20 @@ class TestNearest:
             mock_db.get_fleet_lanes.return_value = _LANES
             assert FleetRouter.find_nearest_waypoint(1.9, 0.1) == 'C'
             assert FleetRouter.find_nearest_waypoint(-0.2, 1.1) == 'D'
+
+
+class TestRoutesStorage:
+    def test_reserve_populates_routes(self, router):
+        r1_route = router.plan('r1', (0.0, 0.0), 'C')
+        router.reserve('r1', r1_route)
+        assert router._routes.get('r1') == [0, 1, 2]  # A=0, B=1, C=2
+
+    def test_release_clears_routes(self, router):
+        router.reserve('r1', router.plan('r1', (0.0, 0.0), 'C'))
+        router.release('r1')
+        assert 'r1' not in router._routes
+
+    def test_reserve_overwrites_prior_route(self, router):
+        router.reserve('r1', router.plan('r1', (0.0, 0.0), 'C'))
+        router.reserve('r1', router.plan('r1', (0.0, 0.0), 'D'))
+        assert router._routes.get('r1') == [0, 3]  # A=0, D=3

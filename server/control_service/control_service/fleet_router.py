@@ -44,6 +44,8 @@ class FleetRouter:
         self._lock = threading.Lock()
         # (from_idx, to_idx) -> robot_id
         self._edges: dict[tuple[int, int], str] = {}
+        # robot_id -> list of vertex indices along reserved route
+        self._routes: dict[str, list[int]] = {}
 
     # ──────────────────────────────────────────
     # Graph loading
@@ -254,6 +256,7 @@ class FleetRouter:
             for e in dest_in_edges:
                 # 이미 누가 잡고 있으면 덮어쓰지 않음 (first-come-first-served)
                 self._edges.setdefault(e, robot_id)
+            self._routes[robot_id] = self._route_to_idx_path(route)
             total = len(self._edges)
         logger.info(
             'reserve robot=%s route_edges=%d dest_blockers=%d '
@@ -268,6 +271,23 @@ class FleetRouter:
         stale = [e for e, owner in self._edges.items() if owner == robot_id]
         for e in stale:
             del self._edges[e]
+        self._routes.pop(robot_id, None)
+
+    @staticmethod
+    def _route_to_idx_path(route: list[dict]) -> list[int]:
+        """route ({x,y} points) → [vertex_idx, ...] 변환. 매칭 실패 시 스킵."""
+        if not route:
+            return []
+        waypoints, _ = FleetRouter._load_graph()
+        if not waypoints:
+            return []
+        path: list[int] = []
+        for pt in route:
+            for w in waypoints:
+                if abs(w['x'] - pt['x']) < 0.01 and abs(w['y'] - pt['y']) < 0.01:
+                    path.append(w['idx'])
+                    break
+        return path
 
     @staticmethod
     def _route_to_edges(route: list[dict]) -> list[tuple[int, int]]:
