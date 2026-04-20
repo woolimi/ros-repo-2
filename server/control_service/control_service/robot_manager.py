@@ -1167,6 +1167,47 @@ class RobotManager:
         )
         return yield_route, False
 
+    def _check_yield_resume(
+        self, robot_id: str, state: 'RobotState',
+    ) -> None:
+        """대기 중이던 loser 가 원 목적지로 재출발할 수 있는지 검사."""
+        original = self._pending_navigate.get(robot_id)
+        if not original:
+            return
+        if state.mode != 'GUIDING':
+            # GUIDING 아니면 대기 자체가 무의미 — 큐에서 제거
+            self._pending_navigate.pop(robot_id, None)
+            return
+
+        zone_id = original.get('zone_id')
+        if zone_id is None:
+            self._pending_navigate.pop(robot_id, None)
+            return
+
+        wp_name = self._pick_waypoint_for_zone(robot_id, zone_id)
+        if not wp_name:
+            return
+
+        blocked = self._vertices_blocked_by_others(robot_id)
+        candidate = self._router.plan(
+            robot_id, (state.pos_x, state.pos_y), wp_name,
+            blocked_vertices=blocked,
+        )
+        if not candidate:
+            return
+
+        if self._router.detect_conflict(candidate, robot_id) is not None:
+            return
+
+        # 충돌 해소 — 원 payload 로 재dispatch
+        payload_copy = dict(original)
+        self._pending_navigate.pop(robot_id, None)
+        self._dispatch_navigate_to(robot_id, payload_copy)
+        self._push_event(
+            robot_id, 'YIELD_CLEAR',
+            detail=f'resumed to zone={zone_id}',
+        )
+
     def _plan_return_route(
         self, robot_id: str, pos_x: float, pos_y: float,
     ) -> list[dict]:

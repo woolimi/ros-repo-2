@@ -583,3 +583,50 @@ class TestGuidingYield:
         assert '18' in hold_events[0][2]
         # loser payload preserved for resume
         assert rm._pending_navigate.get('54') == {'zone_id': 22}
+
+    def test_check_yield_resume_redispatches_when_clear(self):
+        rm = make_rm()
+        events = []
+        rm._push_event = lambda rid, ev, **kw: events.append((rid, ev, kw.get('detail', '')))
+
+        rm.on_status('54', {'mode': 'GUIDING', 'pos_x': 0.5, 'pos_y': 0.0,
+                            'battery': 90.0, 'is_locked_return': False})
+        state = rm.get_state('54')
+        rm._pending_navigate['54'] = {'zone_id': 22}
+
+        rm._pick_waypoint_for_zone = MagicMock(return_value='음료1')
+        rm._router.plan = MagicMock(return_value=[
+            {'x': 0.5, 'y': 0.0}, {'x': 1.0, 'y': 0.0}])
+        rm._router.detect_conflict = MagicMock(return_value=None)
+        rm._vertices_blocked_by_others = MagicMock(return_value=set())
+        dispatch_calls = []
+        rm._dispatch_navigate_to = lambda rid, p: dispatch_calls.append((rid, p))
+
+        rm._check_yield_resume('54', state)
+
+        assert dispatch_calls == [('54', {'zone_id': 22})]
+        clear_events = [e for e in events if e[1] == 'YIELD_CLEAR']
+        assert len(clear_events) == 1
+
+    def test_check_yield_resume_skipped_when_conflict_persists(self):
+        rm = make_rm()
+        rm.on_status('54', {'mode': 'GUIDING', 'pos_x': 0.5, 'pos_y': 0.0,
+                            'battery': 90.0, 'is_locked_return': False})
+        state = rm.get_state('54')
+        rm._pending_navigate['54'] = {'zone_id': 22}
+        rm._pick_waypoint_for_zone = MagicMock(return_value='음료1')
+        rm._router.plan = MagicMock(return_value=[
+            {'x': 0.5, 'y': 0.0}, {'x': 1.0, 'y': 0.0}])
+
+        from control_service.fleet_router import ConflictInfo
+        rm._router.detect_conflict = MagicMock(return_value=ConflictInfo(
+            partner_id='18', conflict_entry_idx=0, conflict_exit_idx=1,
+            conflict_type='E_OPPOSE'))
+        rm._vertices_blocked_by_others = MagicMock(return_value=set())
+        dispatch_calls = []
+        rm._dispatch_navigate_to = lambda rid, p: dispatch_calls.append((rid, p))
+
+        rm._check_yield_resume('54', state)
+
+        assert dispatch_calls == []
+        assert '54' in rm._pending_navigate
