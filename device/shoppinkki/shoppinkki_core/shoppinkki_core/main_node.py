@@ -109,14 +109,14 @@ class ShoppinkkiMainNode(Node):
 
         # ── py_trees BT 생성 (BT1~BT5) ─────────────────────
         import py_trees
-        if _NAV_BT_AVAILABLE and self.doll_detector is not None:
+        if _NAV_BT_AVAILABLE and self._vision.doll_detector is not None:
             self._bt_tracking = create_tracking_tree(
-                doll_detector=self.doll_detector,
+                doll_detector=self._vision.doll_detector,
                 publisher=self._robot_publisher,
                 get_scan=self._get_forward_scan,
             )
             self._bt_searching = create_searching_tree(
-                doll_detector=self.doll_detector,
+                doll_detector=self._vision.doll_detector,
                 publisher=self._robot_publisher,
                 get_scan=self._get_forward_scan,
             )
@@ -128,7 +128,7 @@ class ShoppinkkiMainNode(Node):
                 publisher=self._robot_publisher,
             )
             charger_zone_id = CHARGER_ZONE_IDS.get(ROBOT_ID)
-            charger_zone = self._zones.get(charger_zone_id) if charger_zone_id else None
+            charger_zone = self._cart.zones.get(charger_zone_id) if charger_zone_id else None
 
             def _get_parking_slot(z=charger_zone):
                 if z is None:
@@ -209,10 +209,10 @@ class ShoppinkkiMainNode(Node):
             bt_returning=self._bt_returning,
             on_arrived=self._on_arrived,
             on_nav_failed=self._on_nav_failed,
-            doll_detector=self.doll_detector,
+            doll_detector=self._vision.doll_detector,
             is_registration_active=self._vision.is_registration_active,
-            is_tracking_grace_active=self._is_tracking_grace_active,
-            has_unpaid_items=self._has_unpaid_items,
+            is_tracking_grace_active=self._vision.is_tracking_grace_active,
+            has_unpaid_items=self._cart.has_unpaid_items,
         )
         self.bt_runner.setup(node=self)
 
@@ -224,7 +224,7 @@ class ShoppinkkiMainNode(Node):
             on_delete_item=self._on_delete_item,
             on_admin_goto=self._on_admin_goto,
             on_start_session=self._on_start_session,
-            has_unpaid_items=self._has_unpaid_items,
+            has_unpaid_items=self._cart.has_unpaid_items,
             on_enter_registration=self._on_enter_registration,
             on_retake_registration=self._on_retake_registration,
             on_enter_simulation=self._on_enter_simulation,
@@ -357,13 +357,14 @@ class ShoppinkkiMainNode(Node):
 
     def _bt_tick_callback(self) -> None:
         # Battery check (HALTED trigger)
-        if self._battery < BATTERY_THRESHOLD and self.sm.state != 'HALTED':
-            self.get_logger().warning(f'Battery low ({self._battery:.0f}%) → HALTED')
+        battery = self._cart.battery
+        if battery < BATTERY_THRESHOLD and self.sm.state != 'HALTED':
+            self.get_logger().warning(f'Battery low ({battery:.0f}%) → HALTED')
             self.sm.enter_halted()
             return
         # CHARGING → IDLE: 배터리 충분하면 자동 전환
-        if self.sm.state == 'CHARGING' and self._battery >= CHARGING_COMPLETE_THRESHOLD:
-            self.get_logger().info(f'Battery {self._battery:.0f}% >= {CHARGING_COMPLETE_THRESHOLD}% → IDLE')
+        if self.sm.state == 'CHARGING' and battery >= CHARGING_COMPLETE_THRESHOLD:
+            self.get_logger().info(f'Battery {battery:.0f}% >= {CHARGING_COMPLETE_THRESHOLD}% → IDLE')
             self.sm.charging_completed()
             return
         self.bt_runner.tick()
@@ -375,7 +376,7 @@ class ShoppinkkiMainNode(Node):
             'pos_x': self._localization.pos_x,
             'pos_y': self._localization.pos_y,
             'yaw': self._localization.yaw,
-            'battery': self._battery,
+            'battery': self._cart.battery,
             'is_locked_return': self.sm.is_locked_return,
             'follow_disabled': self._vision.get_follow_disabled(),
             'waiting_timeout_sec': int(WAITING_TIMEOUT),
@@ -458,9 +459,6 @@ class ShoppinkkiMainNode(Node):
         """사용자가 [다시 찍기]를 눌렀을 때 새 후보 감지 재개."""
         self._vision.retake_registration()
 
-    def _is_tracking_grace_active(self) -> bool:
-        return self._vision.is_tracking_grace_active()
-
     def _on_enter_simulation(self) -> None:
         """시뮬레이션 모드 진입: IDLE → TRACKING 전환 + 추종 비활성화."""
         if self.sm.state != 'IDLE':
@@ -474,74 +472,6 @@ class ShoppinkkiMainNode(Node):
         self._vision.set_follow_disabled(True)
         self.bt_runner.follow_disabled = True
         self.sm.enter_tracking()
-
-    # ──────────────────────────────────────────
-    # Cart / Battery / Zones 임시 위임 (Phase 6에서 제거 예정)
-    # ──────────────────────────────────────────
-
-    @property
-    def _cart_items(self) -> list:
-        return self._cart.items
-
-    @property
-    def _battery(self) -> float:
-        return self._cart.battery
-
-    @_battery.setter
-    def _battery(self, val: float) -> None:
-        self._cart.update_battery(val)
-
-    @property
-    def _zones(self) -> dict[int, dict]:
-        return self._cart.zones
-
-    @property
-    def _control_service_base(self) -> str:
-        return self._cart.base_url
-
-    # ──────────────────────────────────────────
-    # Localization 임시 위임 (Phase 6에서 제거 예정 — BT 등 외부 callsite 호환용)
-    # ──────────────────────────────────────────
-
-    @property
-    def _pos_x(self) -> float:
-        return self._localization.pos_x
-
-    @property
-    def _pos_y(self) -> float:
-        return self._localization.pos_y
-
-    @property
-    def _yaw(self) -> float:
-        return self._localization.yaw
-
-    def _get_live_pose(self) -> tuple[float, float, float]:
-        return self._localization.get_live_pose()
-
-    # ──────────────────────────────────────────
-    # Nav2 임시 alias (Phase 6에서 제거 예정 — BT 등 외부 callsite 호환용)
-    # ──────────────────────────────────────────
-
-    def _send_nav_goal_guiding(self, x: float, y: float, theta: float) -> bool:
-        return self._nav.send_goal_guiding(x, y, theta)
-
-    def _send_nav_goal_returning(self, x: float, y: float, theta: float) -> bool:
-        return self._nav.send_goal_returning(x, y, theta)
-
-    def _send_nav_goal(self, x: float, y: float, theta: float) -> bool:
-        return self._nav._send_nav_goal(x, y, theta)
-
-    def _send_nav_through_poses(self, poses) -> bool:
-        return self._nav._send_nav_through_poses(poses)
-
-    def _cancel_active_nav(self) -> None:
-        self._nav.cancel_active()
-
-    def _set_nav2_mode(self, mode: str) -> None:
-        self._nav._set_nav2_mode(mode)
-
-    def _set_inflation(self, enable: bool) -> None:
-        self._nav._set_inflation(enable)
 
     def _on_admin_goto(self, x: float, y: float, theta: float) -> None:
         self.get_logger().info('admin_goto: (%.2f, %.2f, %.2f)' % (x, y, theta))
@@ -561,20 +491,6 @@ class ShoppinkkiMainNode(Node):
 
     def _on_nav_failed(self) -> None:
         self.get_logger().warning('Navigation failed')
-
-    def _has_unpaid_items(self) -> bool:
-        return self._cart.has_unpaid_items()
-
-    def _rest_get_json(self, path: str) -> dict:
-        return self._cart.rest_get_json(path)
-
-    # ──────────────────────────────────────────
-    # Vision 임시 위임 (Phase 6에서 제거 예정 — BT 등 외부 callsite 호환용)
-    # ──────────────────────────────────────────
-
-    @property
-    def doll_detector(self):
-        return self._vision.doll_detector
 
     # ──────────────────────────────────────────
     # 인형 등록 확인 콜백
