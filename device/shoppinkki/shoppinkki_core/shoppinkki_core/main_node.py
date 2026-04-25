@@ -18,8 +18,6 @@ import logging
 import os
 import threading
 import time
-from urllib.error import HTTPError, URLError
-from urllib import request as urlrequest
 from typing import Optional
 import struct
 import cv2
@@ -32,6 +30,7 @@ from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import String
 
 from .bt_runner import BTRunner
+from .cart_session_manager import CartSessionManager
 from .cmd_handler import CmdHandler
 from .localization_manager import LocalizationManager
 from .nav_manager import NavManager
@@ -41,7 +40,6 @@ from .config import (
     CHARGER_ZONE_IDS,
     WAITING_TIMEOUT,
 )
-from shoppinkki_nav.nav2_client import fetch_all_zones
 from .hw_controller import HWController
 from .state_machine import ShoppinkkiFSM
 
@@ -86,11 +84,16 @@ class ShoppinkkiMainNode(Node):
         super().__init__(f'shoppinkki_main_{ROBOT_ID}')
         self.get_logger().info(f'Starting ShopPinkki main node (robot_id={ROBOT_ID})')
 
-        # ── Zone cache (control_service REST /zones, 시작 시 1회 fetch) ──
+        # ── Cart / Battery / Session / Zones / REST 매니저 ──
+        # control_service REST /zones는 시작 시 1회 fetch (BT4 charger zone 등에서 사용).
         _cs_host = os.environ.get('CONTROL_SERVICE_HOST', '127.0.0.1')
         _cs_port = int(os.environ.get('CONTROL_SERVICE_PORT', '8081'))
-        self._control_service_base = f'http://{_cs_host}:{_cs_port}'
-        self._zones: dict[int, dict] = fetch_all_zones(_cs_host, _cs_port)
+        self._cart = CartSessionManager(
+            self,
+            robot_id=ROBOT_ID,
+            control_service_base=f'http://{_cs_host}:{_cs_port}',
+        )
+        self._cart.fetch_zones(_cs_host, _cs_port)
 
         # ── State machine ─────────────────────
         self.sm = ShoppinkkiFSM(
@@ -263,8 +266,7 @@ class ShoppinkkiMainNode(Node):
             String, f'/robot_{ROBOT_ID}/status', 10)
         self._alarm_pub = self.create_publisher(
             String, f'/robot_{ROBOT_ID}/alarm', 10)
-        self._cart_pub = self.create_publisher(
-            String, f'/robot_{ROBOT_ID}/cart', 10)
+        # NOTE: /robot_<id>/cart publisher는 CartSessionManager가 소유한다.
         self._snapshot_pub = self.create_publisher(
             String, f'/robot_{ROBOT_ID}/snapshot', 10)
         self._customer_event_pub = self.create_publisher(
@@ -313,8 +315,7 @@ class ShoppinkkiMainNode(Node):
             )
 
         # ── Internal state ────────────────────
-        self._battery: float = 100.0
-        self._cart_items: list = []
+        # NOTE: _battery, _cart_items는 CartSessionManager가 소유한다 (Phase 3).
         self.follow_disabled: bool = False
 
         # ── 카메라 / 스냅샷 상태 ───────────────
@@ -458,7 +459,7 @@ class ShoppinkkiMainNode(Node):
 
     def _on_session_end(self) -> None:
         self.get_logger().info('Session ended for robot %s' % ROBOT_ID)
-        self._cart_items = []
+        self._cart.clear_session()
         self.follow_disabled = False
         self.bt_runner.follow_disabled = False
         self._registration_active = False
@@ -472,7 +473,9 @@ class ShoppinkkiMainNode(Node):
 
     def _on_start_session(self, user_id: str) -> None:
         self.get_logger().info('Session started: user=%s' % user_id)
-        if self.doll_detector: self.doll_detector.reset()
+        self._cart.clear_session()
+        if self.doll_detector:
+            self.doll_detector.reset()
 
     def _on_navigate_cancel(self) -> None:
         """fleet adapter에서 navigate_cancel 수신 — BT4 goal 취소."""
@@ -496,8 +499,7 @@ class ShoppinkkiMainNode(Node):
             self._bt_guiding.set_goals(goal_poses)
 
     def _on_delete_item(self, item_id: int) -> None:
-        self.get_logger().info('delete_item: id=%d' % item_id)
-        self._cart_items = [i for i in self._cart_items if i.get('id') != item_id]
+        self._cart.remove_item(item_id)
 
     def _on_enter_registration(self) -> None:
         """고객이 /register 페이지에 접속: LCD 카메라 피드 전환."""
@@ -527,6 +529,30 @@ class ShoppinkkiMainNode(Node):
         self.follow_disabled = True
         self.bt_runner.follow_disabled = True
         self.sm.enter_tracking()
+
+    # ──────────────────────────────────────────
+    # Cart / Battery / Zones 임시 위임 (Phase 6에서 제거 예정)
+    # ──────────────────────────────────────────
+
+    @property
+    def _cart_items(self) -> list:
+        return self._cart.items
+
+    @property
+    def _battery(self) -> float:
+        return self._cart.battery
+
+    @_battery.setter
+    def _battery(self, val: float) -> None:
+        self._cart.update_battery(val)
+
+    @property
+    def _zones(self) -> dict[int, dict]:
+        return self._cart.zones
+
+    @property
+    def _control_service_base(self) -> str:
+        return self._cart.base_url
 
     # ──────────────────────────────────────────
     # Localization 임시 위임 (Phase 6에서 제거 예정 — BT 등 외부 callsite 호환용)
@@ -592,43 +618,10 @@ class ShoppinkkiMainNode(Node):
         self.get_logger().warning('Navigation failed')
 
     def _has_unpaid_items(self) -> bool:
-        """True if cart has unpaid lines (local cache, else control_service REST).
-
-        On REST/network errors, returns False so WAITING exit uses RETURNING
-        (via ``waiting_exit_by_unpaid``), not LOCKED — avoids false LOCKED when
-        the server cannot be reached. Matches BTRunner: callback exception → unpaid False.
-        """
-        # 1) Prefer local cart cache if available
-        if any(not item.get('is_paid', True) for item in self._cart_items):
-            return True
-
-        # 2) Fallback to control_service REST for authoritative cart state
-        try:
-            session = self._rest_get_json(f'/session/robot/{ROBOT_ID}')
-            cart_id = int((session or {}).get('cart_id', 0) or 0)
-            if cart_id <= 0:
-                return False
-            result = self._rest_get_json(f'/cart/{cart_id}/has_unpaid')
-            return bool((result or {}).get('has_unpaid', False))
-        except (HTTPError, URLError, TimeoutError) as e:
-            # 조회 실패 시 LOCKED 오탐을 피하기 위해 RETURNING 경로를 우선한다.
-            self.get_logger().warning(f'has_unpaid_items fallback failed: {e}')
-            return False
-        except Exception as e:
-            self.get_logger().warning(f'has_unpaid_items unexpected error: {e}')
-            return False
+        return self._cart.has_unpaid_items()
 
     def _rest_get_json(self, path: str) -> dict:
-        url = f'{self._control_service_base}{path}'
-        req = urlrequest.Request(url, method='GET')
-        try:
-            with urlrequest.urlopen(req, timeout=1.5) as resp:
-                return json.loads(resp.read().decode('utf-8'))
-        except HTTPError as e:
-            # 404는 "활성 세션/카트 없음"으로 간주한다.
-            if e.code == 404:
-                return {}
-            raise
+        return self._cart.rest_get_json(path)
 
     # ──────────────────────────────────────────
     # 카메라 루프 (별도 스레드)
