@@ -473,75 +473,70 @@ class DollDetector:
             self._frame_count = 0
         logger.info('DollDetector: 주인 인형 등록 완료 (gallery 초기화)')
 
-    def run(self, frame) -> None:
-        """TRACKING 상태에서 매 프레임 호출. 주인 인형을 식별해 _latest 갱신."""
-        # During registration, we still want to run YOLO to update _latest for the LCD preview
-        if not self._ready and not self.show_all_detections:
-            # If we are not ready, just run YOLO to update the connection status and count
-            raw_detections = self._run_yolo(frame)
-            self._frame_count += 1
-            
-            # Update _latest with the best raw detection for the LCD preview during registration
-            # BUT only if it is Red, to avoid showing QR code boxes
-            with self._lock:
-                if raw_detections:
-                    doll_detections = [d for d in raw_detections if self._is_doll_class(d)]
-                    if self._reject_dark_objects:
-                        doll_detections = [
-                            d for d in doll_detections
-                            if not self._is_mostly_dark(frame, d, threshold=self._dark_ratio_threshold)
-                        ]
-                    if doll_detections:
-                        best_raw = max(doll_detections, key=lambda d: d.get('confidence', 0))
-                        self._latest = Detection(
-                            cx=float(best_raw.get('cx', 0)),
-                            cy=float(best_raw.get('cy', 0)),
-                            area=float(best_raw.get('area', 10000)),
-                            confidence=float(best_raw.get('confidence', 0)),
-                            bbox=[
-                                float(best_raw.get('x1', 0)),
-                                float(best_raw.get('y1', 0)),
-                                float(best_raw.get('x2', 0)),
-                                float(best_raw.get('y2', 0))
-                            ],
-                            mask=best_raw.get('mask'),
-                            features=best_raw.get('features')
-                        )
-                    else:
-                        self._latest = None
-                else:
-                    self._latest = None
-            return
+    def _handle_not_ready(self, frame) -> bool:
+        """등록 단계 등 not_ready 상태에서 LCD preview용으로만 _latest 갱신.
 
+        호출자에게 'handled' 신호 반환: True면 run()은 바로 return해야 함.
+        show_all_detections (디버그) 모드에선 정상 경로로 가도록 False 반환.
+        """
+        if self._ready or self.show_all_detections:
+            return False
+
+        # 등록 단계: YOLO만 돌려 연결 상태/감지 수를 업데이트하고 LCD preview용 _latest 설정
         raw_detections = self._run_yolo(frame)
-        if raw_detections:
-            logger.info('DollDetector: 수신 %d개 (신뢰도 %f)', 
-                        len(raw_detections), raw_detections[0]['confidence'])
-        
-        # 주인 인형을 찾기 위한 트래커 업데이트는 ready 상태일 때만 수행하거나 
-        # 디버그 모드일 때도 기본 박스를 보여주기 위해 수행
-        detections = self._tracker.update(raw_detections) if raw_detections else []
-
         self._frame_count += 1
 
+        with self._lock:
+            if raw_detections:
+                doll_detections = [d for d in raw_detections if self._is_doll_class(d)]
+                if self._reject_dark_objects:
+                    doll_detections = [
+                        d for d in doll_detections
+                        if not self._is_mostly_dark(frame, d, threshold=self._dark_ratio_threshold)
+                    ]
+                if doll_detections:
+                    best_raw = max(doll_detections, key=lambda d: d.get('confidence', 0))
+                    self._latest = Detection(
+                        cx=float(best_raw.get('cx', 0)),
+                        cy=float(best_raw.get('cy', 0)),
+                        area=float(best_raw.get('area', 10000)),
+                        confidence=float(best_raw.get('confidence', 0)),
+                        bbox=[
+                            float(best_raw.get('x1', 0)),
+                            float(best_raw.get('y1', 0)),
+                            float(best_raw.get('x2', 0)),
+                            float(best_raw.get('y2', 0))
+                        ],
+                        mask=best_raw.get('mask'),
+                        features=best_raw.get('features')
+                    )
+                else:
+                    self._latest = None
+            else:
+                self._latest = None
+        return True
+
+    def _match_owner(
+        self,
+        frame,
+        candidates: List[dict],
+        gallery_snapshot: List[List[float]],
+        hsv_template: Optional[List[float]],
+        safe_id: Optional[int],
+    ) -> Tuple[Optional[dict], Optional[List[float]]]:
+        """후보 detection들 중 주인 인형 매칭 시도.
+
+        safe_id 일치 시 빠른 패스 (ReID 생략, 자동 보정 주기에만 피처 계산).
+        그렇지 않으면 ReID 유사도 + HSV 히스토그램 상관계수로 매칭. 임계값
+        통과 시 verification buffer 증가 → VERIFY_FRAMES 도달 시 safe_id 잠금.
+
+        Returns:
+            (best_det, best_reid_vec) — 매칭 실패 시 (None, None).
+        """
         best_det: Optional[dict] = None
         best_reid_vec: Optional[List[float]] = None
 
-        with self._lock:
-            gallery_snapshot = list(self._gallery)
-            hsv_template = self._template_hsv
-            safe_id = self._safe_id
-
-        # ReID is expensive. Evaluate only the highest-confidence candidates first
-        # to reduce bbox/control lag while preserving owner matching quality.
-        detections_sorted = sorted(
-            detections,
-            key=lambda x: float(x.get('confidence', 0.0)),
-            reverse=True
-        )
-        reid_candidates = detections_sorted[:3]
-
-        for d in reid_candidates:
+        for d in candidates:
             if d.get('confidence', 0) < MIN_CONFIDENCE:
                 continue
 
@@ -550,7 +545,7 @@ class DollDetector:
             # 빠른 경로: safe_id 일치 시 ReID 생략
             if safe_id is not None and tid == safe_id:
                 best_det = d
-                # 자동 보정 주기에만 피처 계산 (리소소 절약)
+                # 자동 보정 주기에만 피처 계산 (리소스 절약)
                 # 원격 서버에서 피처를 이미 준 경우 그것을 사용
                 if self._frame_count % CALIBRATION_INTERVAL == 0:
                     if d.get('features'):
@@ -570,7 +565,7 @@ class DollDetector:
                 if roi is None:
                     continue
                 reid_vec = self._reid.extract_features(roi).tolist()
-                
+
             # HSV 는 로컬에서 보조적으로 계산 (색상 필터용 - 조명 변화 대응)
             # ReID 피처가 서버에서 왔더라도 ROI가 필요하므로 추출 (이미 추출했으면 재사용)
             roi = self._extract_roi(frame, d)
@@ -601,7 +596,15 @@ class DollDetector:
                 with self._lock:
                     self._verification_buffer.pop(tid, None)
 
-        # _latest 갱신
+        return best_det, best_reid_vec
+
+    def _update_latest(self, best_det: Optional[dict], raw_detections: List[dict]) -> None:
+        """매칭 결과 또는 디버그 모드에 따라 self._latest 갱신.
+
+        - best_det 있음: smoother update + Detection 저장
+        - 디버그 모드(show_all_detections) + raw_detections 있음: 주인 아니어도 노출
+        - 그 외: _latest 클리어 + smoother 리셋
+        """
         with self._lock:
             if best_det is not None:
                 # ── Smoothing Update ──
@@ -648,6 +651,41 @@ class DollDetector:
             else:
                 self._latest = None
                 self._smoother.reset()
+
+    def run(self, frame) -> None:
+        """TRACKING 상태에서 매 프레임 호출. 주인 인형을 식별해 _latest 갱신."""
+        if self._handle_not_ready(frame):
+            return
+
+        raw_detections = self._run_yolo(frame)
+        if raw_detections:
+            logger.info('DollDetector: 수신 %d개 (신뢰도 %f)', 
+                        len(raw_detections), raw_detections[0]['confidence'])
+        
+        # 주인 인형을 찾기 위한 트래커 업데이트는 ready 상태일 때만 수행하거나 
+        # 디버그 모드일 때도 기본 박스를 보여주기 위해 수행
+        detections = self._tracker.update(raw_detections) if raw_detections else []
+
+        self._frame_count += 1
+
+        with self._lock:
+            gallery_snapshot = list(self._gallery)
+            hsv_template = self._template_hsv
+            safe_id = self._safe_id
+
+        # ReID is expensive. Evaluate only the highest-confidence candidates first
+        # to reduce bbox/control lag while preserving owner matching quality.
+        reid_candidates = sorted(
+            detections,
+            key=lambda x: float(x.get('confidence', 0.0)),
+            reverse=True,
+        )[:3]
+
+        best_det, best_reid_vec = self._match_owner(
+            frame, reid_candidates, gallery_snapshot, hsv_template, safe_id,
+        )
+
+        self._update_latest(best_det, raw_detections)
 
         # 자동 보정: 30프레임마다 갤러리 확장
         if (best_det is not None and best_reid_vec is not None
