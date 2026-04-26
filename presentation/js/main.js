@@ -194,6 +194,40 @@ async function initPresentation() {
       s.style.top = topOffset + 'px';
     });
   }
+
+  // Wait for current slide's media (images, video metadata, fonts) to load.
+  // 직접 #/<slide-id>로 진입 시 forceCenterAlign이 콘텐츠 측정 전에 실행되어
+  // 레이아웃이 어긋나는 문제를 해결하기 위함.
+  function waitForCurrentSlideMedia() {
+    var slide = Reveal.getCurrentSlide();
+    if (!slide) return Promise.resolve();
+    var promises = [];
+
+    slide.querySelectorAll('img').forEach(function(img) {
+      if (!img.complete) {
+        promises.push(new Promise(function(res) {
+          img.addEventListener('load',  res, { once: true });
+          img.addEventListener('error', res, { once: true });
+        }));
+      }
+    });
+
+    slide.querySelectorAll('video').forEach(function(v) {
+      if (v.readyState < 1) { // HAVE_METADATA
+        promises.push(new Promise(function(res) {
+          v.addEventListener('loadedmetadata', res, { once: true });
+          v.addEventListener('error',         res, { once: true });
+        }));
+      }
+    });
+
+    if (document.fonts && document.fonts.ready) {
+      promises.push(document.fonts.ready);
+    }
+
+    return Promise.all(promises);
+  }
+
   Reveal.on('ready', function() {
     // Hide loading screen
     var loadingScreen = document.getElementById('loading-screen');
@@ -206,6 +240,18 @@ async function initPresentation() {
     initVideoControls();
     initDraw();
     forceCenterAlign();
+
+    // 현재 슬라이드 미디어 로드 후 재정렬 + autoplay 비디오 시작.
+    // 직접 deep-link(#/demo-slide 등) 진입 시 디자인 깨짐 방지.
+    waitForCurrentSlideMedia().then(function() {
+      forceCenterAlign();
+      Reveal.getCurrentSlide().querySelectorAll('video[autoplay]').forEach(function(v) {
+        v.currentTime = 0;
+        var p = v.play();
+        if (p && typeof p.catch === 'function') p.catch(function() { /* autoplay blocked */ });
+      });
+    });
+
     // Make slide number indicator clickable
     var slideNum = document.querySelector('.reveal .slide-number');
     if (slideNum) {
